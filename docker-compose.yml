@@ -1,0 +1,117 @@
+version: "3.8"
+
+services:
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka
+    network_mode: "host"
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@localhost:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    volumes:
+      - kafka_data:/bitnami/kafka
+
+  postgres:
+    image: postgres:13
+    container_name: postgres
+    network_mode: "host"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=123456789
+      - POSTGRES_DB=sockbowl
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  neo4j-plugin-init:
+    image: curlimages/curl
+    container_name: neo4j-plugin-init
+    network_mode: "host"
+    volumes:
+      - ./scripts/download-neo4j-plugins.sh:/plugin.sh
+      - neo4j_plugins:/plugins
+    entrypoint: ["/plugin.sh"]
+    restart: "no"
+
+  redis:
+    image: bitnami/redis:latest
+    network_mode: "host"
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+      - REDIS_EXTRA_FLAGS=--loadmodule /opt/bitnami/redis/lib/redis/modules/redisearch.so --loadmodule /opt/bitnami/redis/lib/redis/modules/rejson.so
+
+  neo4j:
+    image: neo4j:latest
+    container_name: neo4j
+    network_mode: "host"
+    depends_on:
+      - neo4j-plugin-init
+    environment:
+      - NEO4J_AUTH=neo4j/123456789
+    volumes:
+      - neo4j_data:/data
+      - neo4j_plugins:/plugins
+    command: ["neo4j"]
+
+  neo4j-data-import:
+    image: neo4j:latest
+    container_name: neo4j-data-import
+    network_mode: "host"
+    depends_on:
+      - neo4j
+    volumes:
+      - ./scripts/init-neo4j.sh:/init.sh
+    entrypoint: ["/init.sh"]
+    restart: "no"
+
+  sockbowl-game:
+    image: ghcr.io/jacob-sabella/sockbowl-game:main
+    container_name: sockbowl-game
+    network_mode: "host"
+    environment:
+      SOCKBOWL_DATABASE: "0"
+      SOCKBOWL_KAFKA_BOOTSTRAP_SERVERS: "localhost:9092"
+      SOCKBOWL_KAFKA_GAME_TOPIC: "game-session-topic"
+      SOCKBOWL_PORT: "7000"
+      SOCKBOWL_REDIS_HOST: "localhost"
+      SOCKBOWL_REDIS_PORT: "6379"
+      SOCKBOWL_QUESTIONS_URL: "http://localhost:7009/"
+    depends_on:
+      - kafka
+      - redis
+      - sockbowl-questions
+
+  sockbowl-questions:
+    image: ghcr.io/jacob-sabella/sockbowl-questions:main
+    container_name: sockbowl-questions
+    network_mode: "host"
+    environment:
+      SOCKBOWL_NEO4J_USER: "neo4j"
+      SOCKBOWL_NEO4J_PASSWORD: "123456789"
+      SOCKBOWL_NEO4J_URL: "bolt://localhost:7687"
+      SOCKBOWL_PORT: "7009"
+      SOCKBOWL_AI_LOCAL_MODEL: "deepseek-r1:70b"
+    depends_on:
+      - neo4j
+
+  sockbowl-ng:
+    image: ghcr.io/jacob-sabella/sockbowl-ng:main
+    container_name: sockbowl-ng
+    network_mode: "host"
+
+volumes:
+  kafka_data:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_plugins:
+    driver: local
