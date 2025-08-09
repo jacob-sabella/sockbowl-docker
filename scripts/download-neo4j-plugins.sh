@@ -6,7 +6,7 @@ echo "📦 Downloading plugins..."
 mkdir -p /plugins
 
 curl -Lf -o /plugins/apoc-2025.06.2-core.jar \
- https://github.com/neo4j/apoc/releases/download/2025.06.2/apoc-2025.06.2-core.jar
+  https://github.com/neo4j/apoc/releases/download/2025.06.2/apoc-2025.06.2-core.jar
 
 curl -Lf -o /plugins/neo4j-graph-data-science-2.19.0.jar \
   https://github.com/neo4j/graph-data-science/releases/download/2.19.0/neo4j-graph-data-science-2.19.0.jar

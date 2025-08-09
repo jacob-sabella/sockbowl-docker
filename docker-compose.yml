@@ -32,6 +32,7 @@ services:
     image: curlimages/curl
     container_name: neo4j-plugin-init
     network_mode: "host"
+    user: "root"
     volumes:
       - ./scripts/download-neo4j-plugins.sh:/plugin.sh
       - neo4j_plugins:/plugins
