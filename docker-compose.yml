@@ -82,6 +82,7 @@ services:
       SOCKBOWL_REDIS_HOST: "localhost"
       SOCKBOWL_REDIS_PORT: "6379"
       SOCKBOWL_QUESTIONS_URL: "http://localhost:7009/"
+      SOCKBOWL_ALLOWED_ORIGINS: "http://localhost/"
     depends_on:
       - kafka
       - redis
@@ -96,7 +97,7 @@ services:
       SOCKBOWL_NEO4J_PASSWORD: "123456789"
       SOCKBOWL_NEO4J_URL: "bolt://localhost:7687"
       SOCKBOWL_PORT: "7009"
-      SOCKBOWL_AI_LOCAL_MODEL: "deepseek-r1:70b"
+      SOCKBOWL_AI_LOCAL_MODEL: "gpt-oss:latest"
     depends_on:
       - neo4j
 
