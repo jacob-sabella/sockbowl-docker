@@ -5,11 +5,13 @@ echo "📦 Downloading plugins..."
 
 mkdir -p /plugins
 
-curl -Lf -o /plugins/apoc-2025.06.2-core.jar \
-  https://github.com/neo4j/apoc/releases/download/2025.06.2/apoc-2025.06.2-core.jar
+curl -Lf -o /plugins/apoc-2025.10.1-core.jar \
+  https://github.com/neo4j/apoc/releases/download/2025.10.1/apoc-2025.10.1-core.jar
 
-curl -Lf -o /plugins/neo4j-graph-data-science-2.19.0.jar \
-  https://github.com/neo4j/graph-data-science/releases/download/2.19.0/neo4j-graph-data-science-2.19.0.jar
+# GDS 2.23.0 has compatibility issues with Neo4j 2025.10.1
+# Commenting out until a compatible version is released
+# curl -Lf -o /plugins/neo4j-graph-data-science-2.23.0.jar \
+#   https://github.com/neo4j/graph-data-science/releases/download/2.23.0/neo4j-graph-data-science-2.23.0.jar
 
 echo "✅ Plugins downloaded to /plugins"
 

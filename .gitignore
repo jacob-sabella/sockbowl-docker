@@ -1,0 +1,58 @@
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+.env.alpha
+.env.beta
+.env.production
+!.env.example
+
+# Keycloak generated files
+keycloak/realm-export.json
+
+# Docker related
+*.log
+docker-compose.override.yml
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*.swn
+.project
+.classpath
+.settings/
+.metadata/
+
+# Backup files
+*.bak
+*.backup
+*.tmp
+*.temp
+
+# SSL/TLS certificates (if any get added)
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+!*-ca.crt
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
