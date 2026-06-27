@@ -130,6 +130,9 @@ services:
   sockbowl-game:
     image: ghcr.io/jacob-sabella/sockbowl-game:main
     container_name: sockbowl-game
+    # App services are gated behind the "full" profile so a bare `docker compose up`
+    # starts infra only (run game/questions/ng from source for local dev).
+    profiles: ["full"]
     network_mode: "host"
     environment:
       SOCKBOWL_DATABASE: 0
@@ -154,6 +157,7 @@ services:
   sockbowl-questions:
     image: ghcr.io/jacob-sabella/sockbowl-questions:main
     container_name: sockbowl-questions
+    profiles: ["full"]
     network_mode: "host"
     environment:
       SOCKBOWL_NEO4J_USER: "${NEO4J_USER}"
@@ -176,6 +180,7 @@ services:
   sockbowl-ng:
     image: ghcr.io/jacob-sabella/sockbowl-ng:main
     container_name: sockbowl-ng
+    profiles: ["full"]
     network_mode: "host"
     environment:
       - APP_HOST=${APP_HOST}
@@ -189,6 +194,7 @@ services:
   watchtower:
     image: containrrr/watchtower:1.7.1
     container_name: watchtower
+    profiles: ["full"]
     volumes:
       - ${XDG_RUNTIME_DIR}/docker.sock:/var/run/docker.sock
     environment:

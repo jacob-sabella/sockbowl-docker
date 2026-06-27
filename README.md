@@ -72,19 +72,53 @@ The docker-compose stack includes:
 
 ## Usage
 
-Start all services:
+The app services (`sockbowl-game`, `sockbowl-questions`, `sockbowl-ng`, `watchtower`)
+are gated behind the `full` Compose **profile**. This gives two workflows:
+
+**Infra only** (default) — start the backing services and run the app code from source
+(recommended for local development, since the published images may lag your local changes):
 ```bash
-docker-compose up -d
+docker compose up -d          # kafka, postgres, keycloak, neo4j, redis (+ init jobs)
 ```
 
-Stop all services:
+**Full stack** — start everything including the published app images from GHCR:
 ```bash
-docker-compose down
+docker compose --profile full up -d
+```
+
+> The app images are `ghcr.io/jacob-sabella/sockbowl-*:main`, built and pushed by CI.
+> To run the *full* stack against local code changes, build the images first
+> (`./gradlew bootBuildImage` in game/questions, `docker build` in ng) or use the
+> infra-only workflow above and start the apps from their dev servers.
+
+Stop services:
+```bash
+docker compose down                      # infra
+docker compose --profile full down       # everything
 ```
 
 View logs:
 ```bash
-docker-compose logs -f [service_name]
+docker compose logs -f [service_name]
+```
+
+### Authentication modes
+
+- **Guest mode** (`AUTH_ENABLED=false`, default) — no Keycloak required; fastest path.
+- **Authenticated mode** (`AUTH_ENABLED=true`) — Keycloak-backed login with RBAC
+  (roles, game/packet ownership, ban system). For an easy local test, also set
+  `CREATE_DEMO_ACCOUNTS=true` and sign in as **`moderator / demo123`** (has the
+  `admin` role) to exercise the ban-management admin UI, or `player1 / demo123` as a
+  regular user. The realm admin user (`KEYCLOAK_USER_*`, default `admin / admin123`)
+  also has the `admin` role.
+
+### Upgrading Postgres data
+
+Postgres is now `postgres:17` and **cannot read a PG13 data directory**. If you are
+upgrading an existing stack, wipe the old volume first (dev data is recreated on boot):
+```bash
+docker compose down
+docker volume rm sockbowl-docker_postgres_data
 ```
 
 ### Script Usage

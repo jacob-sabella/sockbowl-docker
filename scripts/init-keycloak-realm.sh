@@ -94,6 +94,22 @@ if [ "$CREATE_DEMO_ACCOUNTS" = "true" ]; then
           "temporary": false
         }
       ]
+    },
+    {
+      "username": "moderator",
+      "enabled": true,
+      "email": "moderator@sockbowl.com",
+      "firstName": "Mod",
+      "lastName": "Erator",
+      "emailVerified": true,
+      "realmRoles": ["user", "admin"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo123",
+          "temporary": false
+        }
+      ]
     }
   ]'
 
@@ -104,10 +120,11 @@ if [ "$CREATE_DEMO_ACCOUNTS" = "true" ]; then
   mv /tmp/realm-export-with-demo.json /opt/keycloak/data/import/realm-export.json
 
   echo "Demo accounts created:"
-  echo "  - player1 / demo123"
-  echo "  - player2 / demo123"
-  echo "  - player3 / demo123"
-  echo "  - testuser / demo123"
+  echo "  - player1 / demo123       (user)"
+  echo "  - player2 / demo123       (user)"
+  echo "  - player3 / demo123       (user)"
+  echo "  - testuser / demo123      (user)"
+  echo "  - moderator / demo123     (user + admin -> can manage bans)"
 fi
 
 echo "Keycloak realm export generated successfully!"
