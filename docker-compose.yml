@@ -1,6 +1,6 @@
 services:
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:4.0.2
     container_name: kafka
     network_mode: "host"
     environment:
@@ -20,7 +20,9 @@ services:
       - kafka_data:/var/lib/kafka/data
 
   postgres:
-    image: postgres:13
+    # NOTE: Postgres 17 cannot read a PG13 data dir. On upgrade from an older
+    # stack, remove the old volume first: `docker compose down && docker volume rm sockbowl-docker_postgres_data`
+    image: postgres:17
     container_name: postgres
     network_mode: "host"
     environment:
@@ -32,7 +34,7 @@ services:
       - ./scripts/init-postgres.sh:/docker-entrypoint-initdb.d/init.sh
 
   keycloak-realm-init:
-    image: alpine:latest
+    image: alpine:3.21
     container_name: keycloak-realm-init
     network_mode: "host"
     environment:
@@ -53,10 +55,13 @@ services:
     restart: "no"
 
   keycloak:
-    image: quay.io/keycloak/keycloak:23.0
+    image: quay.io/keycloak/keycloak:26.6.4
     container_name: keycloak
     network_mode: "host"
     environment:
+      # KC 26 renamed the bootstrap admin vars; keep legacy ones for back-compat.
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
       - KC_DB=postgres
@@ -74,7 +79,7 @@ services:
       - keycloak-realm-init
 
   neo4j-plugin-init:
-    image: curlimages/curl
+    image: curlimages/curl:8.21.0
     container_name: neo4j-plugin-init
     network_mode: "host"
     user: "root"
@@ -85,14 +90,16 @@ services:
     restart: "no"
 
   redis:
-    image: bitnami/redis:latest
+    # redis-stack-server bundles RediSearch + RedisJSON (required by Redis OM Spring 2.x)
+    # and auto-loads them, so no manual --loadmodule flags are needed.
+    image: redis/redis-stack-server:7.4.0-v8
+    container_name: redis
     network_mode: "host"
-    environment:
-      - ALLOW_EMPTY_PASSWORD=yes
-      - REDIS_EXTRA_FLAGS=--loadmodule /opt/bitnami/redis/lib/redis/modules/redisearch.so --loadmodule /opt/bitnami/redis/lib/redis/modules/rejson.so
+    volumes:
+      - redis_data:/data
 
   neo4j:
-    image: neo4j:latest
+    image: neo4j:5.26
     container_name: neo4j
     network_mode: "host"
     depends_on:
@@ -105,7 +112,7 @@ services:
     command: ["neo4j"]
 
   neo4j-data-import:
-    image: neo4j:latest
+    image: neo4j:5.26
     container_name: neo4j-data-import
     network_mode: "host"
     depends_on:
@@ -180,7 +187,7 @@ services:
       - AUTH_ENABLED=${AUTH_ENABLED}
 
   watchtower:
-    image: containrrr/watchtower
+    image: containrrr/watchtower:1.7.1
     container_name: watchtower
     volumes:
       - ${XDG_RUNTIME_DIR}/docker.sock:/var/run/docker.sock
