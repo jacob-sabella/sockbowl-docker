@@ -93,6 +93,35 @@ services:
         condition: service_healthy
       keycloak-realm-init:
         condition: service_completed_successfully
+    healthcheck:
+      # KC 26's health endpoint lives on the management port (9000), not KC_HTTP_PORT.
+      # The image is UBI-based (has bash) but lacks curl/wget, so we speak raw HTTP
+      # over a /dev/tcp bash socket instead of shelling out to a client.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  rbac-init:
+    image: alpine:3.21
+    container_name: rbac-init
+    network_mode: "host"
+    environment:
+      - KEYCLOAK_URL=http://${APP_HOST}:${KEYCLOAK_PORT}
+      - KEYCLOAK_REALM=sockbowl
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - SOCKBOWL_GAME_BACKEND_SECRET=${SOCKBOWL_GAME_BACKEND_SECRET}
+      - RBAC_MODEL=/rbac-model.json
+    volumes:
+      - ./scripts/load-rbac.sh:/load-rbac.sh
+      - ./keycloak/rbac-model.json:/rbac-model.json
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache bash curl jq >/dev/null && bash /load-rbac.sh"]
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    restart: "no"
 
   neo4j-plugin-init:
     image: curlimages/curl:8.21.0
@@ -188,6 +217,8 @@ services:
         condition: service_started
       keycloak:
         condition: service_started
+      rbac-init:
+        condition: service_completed_successfully
 
   sockbowl-questions:
     image: ghcr.io/jacob-sabella/sockbowl-questions:main
@@ -211,6 +242,8 @@ services:
       neo4j:
         condition: service_healthy
       neo4j-data-import:
+        condition: service_completed_successfully
+      rbac-init:
         condition: service_completed_successfully
 
   sockbowl-ng:
