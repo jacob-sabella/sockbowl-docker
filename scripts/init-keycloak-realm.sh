@@ -102,7 +102,7 @@ if [ "$CREATE_DEMO_ACCOUNTS" = "true" ]; then
       "firstName": "Mod",
       "lastName": "Erator",
       "emailVerified": true,
-      "realmRoles": ["user", "admin"],
+      "realmRoles": ["user"],
       "credentials": [
         {
           "type": "password",
@@ -119,12 +119,16 @@ if [ "$CREATE_DEMO_ACCOUNTS" = "true" ]; then
 
   mv /tmp/realm-export-with-demo.json /opt/keycloak/data/import/realm-export.json
 
-  echo "Demo accounts created:"
-  echo "  - player1 / demo123       (user)"
-  echo "  - player2 / demo123       (user)"
-  echo "  - player3 / demo123       (user)"
-  echo "  - testuser / demo123      (user)"
-  echo "  - moderator / demo123     (user + admin -> can manage bans)"
+  # RBAC tiers are assigned by scripts/load-rbac.sh (the rbac-init step), which is
+  # the single source of truth for role composition. Demo users are created with
+  # only the base "user" role here; the loader maps them to composite tiers:
+  #   player1 -> admin, testuser -> author, moderator -> moderator, others -> player.
+  echo "Demo accounts created (RBAC tier assigned by rbac-init/load-rbac.sh):"
+  echo "  - player1 / demo123       (-> admin: everything)"
+  echo "  - player2 / demo123       (-> player: host/join, browse packets)"
+  echo "  - player3 / demo123       (-> player)"
+  echo "  - testuser / demo123      (-> author: create/generate questions)"
+  echo "  - moderator / demo123     (-> moderator: ban/unban, no admin console)"
 fi
 
 echo "Keycloak realm export generated successfully!"

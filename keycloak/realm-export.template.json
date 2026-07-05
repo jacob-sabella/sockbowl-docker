@@ -2,6 +2,8 @@
   "realm": "sockbowl",
   "enabled": true,
   "sslRequired": "none",
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 36000,
   "registrationAllowed": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
