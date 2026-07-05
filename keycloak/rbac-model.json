@@ -11,5 +11,8 @@
     "user":      ["player"]
   },
   "defaultRole": "player",
-  "serviceClient": { "clientId": "sockbowl-game-backend", "roles": ["packet:read"] }
+  "serviceClient": { "clientId": "sockbowl-game-backend", "roles": ["packet:read"] },
+  "demoUserRoles": {
+    "moderator": "admin"
+  }
 }

@@ -200,6 +200,51 @@ ensure_service_client() {
   done
 }
 
+# Look up a user by exact username. Prints the user's id on stdout, or
+# nothing if the user does not exist (e.g. CREATE_DEMO_ACCOUNTS=false).
+find_user_id_by_username() {
+  local username="$1"
+  local status
+  status="$(http_request GET "${REALM_API}/users?username=$(url_encode "$username")&exact=true")"
+  [ "$status" = "200" ] || fail "failed to look up user '${username}' (status ${status}): $(cat "$RESP_BODY_FILE")"
+  jq -r '.[0].id // empty' "$RESP_BODY_FILE"
+}
+
+# Assign a single realm role to a user by id. Tolerates HTTP 409 (already assigned).
+assign_realm_role_to_user() {
+  local user_id="$1" role_name="$2"
+  local role_json
+  role_json="$(get_role "$role_name")"
+  local status
+  status="$(http_request POST "${REALM_API}/users/${user_id}/role-mappings/realm" "[$role_json]")"
+  case "$status" in
+    204|200) log "role assigned to user: ${role_name}" ;;
+    409) log "role already assigned to user: ${role_name}" ;;
+    *) fail "unexpected status ${status} assigning role '${role_name}' to user id '${user_id}': $(cat "$RESP_BODY_FILE")" ;;
+  esac
+}
+
+# Assign each demoUserRoles entry (username -> composite role name) from the
+# RBAC model. Skips gracefully (no error) when the demo user doesn't exist,
+# e.g. because CREATE_DEMO_ACCOUNTS=false. Idempotent.
+assign_demo_user_roles() {
+  local has_demo_roles
+  has_demo_roles="$(jq -r 'has("demoUserRoles")' "$RBAC_MODEL")"
+  [ "$has_demo_roles" = "true" ] || { log "No demoUserRoles in RBAC model; skipping."; return 0; }
+
+  local username role_name user_id
+  while IFS=$'\t' read -r username role_name; do
+    [ -n "$username" ] || continue
+    user_id="$(find_user_id_by_username "$username")"
+    if [ -z "$user_id" ]; then
+      log "demo user not found, skipping role assignment: ${username} -> ${role_name} (demo accounts likely disabled)"
+      continue
+    fi
+    assign_realm_role_to_user "$user_id" "$role_name"
+    log "demo user role assignment complete: ${username} -> ${role_name}"
+  done < <(jq -r '.demoUserRoles | to_entries[] | [.key, .value] | @tsv' "$RBAC_MODEL")
+}
+
 main() {
   require_deps
   [ -f "$RBAC_MODEL" ] || fail "RBAC model file not found: ${RBAC_MODEL}"
@@ -244,6 +289,9 @@ main() {
     service_roles+=("$sr")
   done < <(jq -r '.serviceClient.roles[]' "$RBAC_MODEL")
   ensure_service_client "$service_client_id" "${service_roles[@]}"
+
+  log "Assigning demo user roles..."
+  assign_demo_user_roles
 
   log "RBAC load complete"
 }
