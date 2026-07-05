@@ -1,0 +1,15 @@
+{
+  "permissionRoles": [
+    "packet:read", "packet:create", "packet:update", "packet:delete",
+    "question:generate", "taxonomy:manage", "game:host", "user:ban", "admin:access"
+  ],
+  "compositeRoles": {
+    "player":    ["packet:read", "game:host"],
+    "author":    ["player", "packet:create", "packet:update", "question:generate", "taxonomy:manage"],
+    "moderator": ["player", "user:ban"],
+    "admin":     ["author", "moderator", "packet:delete", "admin:access"],
+    "user":      ["player"]
+  },
+  "defaultRole": "player",
+  "serviceClient": { "clientId": "sockbowl-game-backend", "roles": ["packet:read"] }
+}
