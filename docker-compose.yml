@@ -15,9 +15,17 @@ services:
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
-      - KAFKA_LOG_RETENTION_HOURS=1
+      # 7 days: game-session messages must survive consumer lag / replay.
+      # The prior 1h value silently dropped messages on any slowdown.
+      - KAFKA_LOG_RETENTION_HOURS=168
     volumes:
       - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
 
   postgres:
     # NOTE: Postgres 17 cannot read a PG13 data dir. On upgrade from an older
@@ -32,6 +40,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-postgres.sh:/docker-entrypoint-initdb.d/init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-sockbowl}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   keycloak-realm-init:
     image: alpine:3.21
@@ -75,8 +89,10 @@ services:
     volumes:
       - keycloak_import:/opt/keycloak/data/import
     depends_on:
-      - postgres
-      - keycloak-realm-init
+      postgres:
+        condition: service_healthy
+      keycloak-realm-init:
+        condition: service_completed_successfully
 
   neo4j-plugin-init:
     image: curlimages/curl:8.21.0
@@ -97,26 +113,40 @@ services:
     network_mode: "host"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   neo4j:
     image: neo4j:5.26
     container_name: neo4j
     network_mode: "host"
     depends_on:
-      - neo4j-plugin-init
+      neo4j-plugin-init:
+        condition: service_completed_successfully
     environment:
       - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
     volumes:
       - neo4j_data:/data
       - neo4j_plugins:/plugins
     command: ["neo4j"]
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -a bolt://localhost:${NEO4J_PORT:-7687} -u ${NEO4J_USER} -p ${NEO4J_PASSWORD} 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 30s
 
   neo4j-data-import:
     image: neo4j:5.26
     container_name: neo4j-data-import
     network_mode: "host"
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
     environment:
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
@@ -141,6 +171,9 @@ services:
       SOCKBOWL_PORT: "${SOCKBOWL_GAME_PORT}"
       SOCKBOWL_REDIS_HOST: "${APP_HOST}"
       SOCKBOWL_REDIS_PORT: "${REDIS_PORT}"
+      SOCKBOWL_DB_URL: "jdbc:postgresql://${APP_HOST}:${POSTGRES_PORT}/sockbowl_users"
+      SOCKBOWL_DB_USERNAME: "${POSTGRES_USER}"
+      SOCKBOWL_DB_PASSWORD: "${POSTGRES_PASSWORD}"
       SOCKBOWL_QUESTIONS_URL: "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}/"
       SOCKBOWL_GAME_ALLOWED_ORIGINS: "${SOCKBOWL_GAME_ALLOWED_ORIGINS}"
       KEYCLOAK_URL: "${KEYCLOAK_URL}"
@@ -149,10 +182,14 @@ services:
       SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED}"
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
     depends_on:
-      - kafka
-      - redis
-      - sockbowl-questions
-      - keycloak
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      sockbowl-questions:
+        condition: service_started
+      keycloak:
+        condition: service_started
 
   sockbowl-questions:
     image: ghcr.io/jacob-sabella/sockbowl-questions:main
@@ -166,7 +203,6 @@ services:
       SOCKBOWL_PORT: "${SOCKBOWL_QUESTIONS_PORT}"
       SOCKBOWL_AI_PROVIDER: "${SOCKBOWL_AI_PROVIDER}"
       SOCKBOWL_AI_LOCAL_MODEL: "${SOCKBOWL_AI_LOCAL_MODEL}"
-      SOCKBOWL_QUESTION_STRATEGY: "${SOCKBOWL_QUESTION_STRATEGY}"
       SPRING_AI_OPENAI_CHAT_ENABLED: "${SPRING_AI_OPENAI_CHAT_ENABLED}"
       SPRING_AI_OLLAMA_CHAT_ENABLED: "${SPRING_AI_OLLAMA_CHAT_ENABLED}"
       SPRING_AI_OLLAMA_BASE_URL: "${SPRING_AI_OLLAMA_BASE_URL}"
@@ -174,8 +210,10 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       SOCKBOWL_ALLOWED_ORIGINS: "${SOCKBOWL_QUESTIONS_ALLOWED_ORIGINS}"
     depends_on:
-      - neo4j
-      - neo4j-data-import
+      neo4j:
+        condition: service_healthy
+      neo4j-data-import:
+        condition: service_completed_successfully
 
   sockbowl-ng:
     image: ghcr.io/jacob-sabella/sockbowl-ng:main
