@@ -5,10 +5,12 @@ echo "📦 Downloading plugins..."
 
 mkdir -p /plugins
 
-curl -Lf -o /plugins/apoc-2025.10.1-core.jar \
-  https://github.com/neo4j/apoc/releases/download/2025.10.1/apoc-2025.10.1-core.jar
+# APOC must match the Neo4j MAJOR.MINOR line (neo4j:5.26 -> apoc 5.26.x).
+# The 2025.x APOC CalVer stream is for Neo4j 2025.x and fails 5.26's version check.
+curl -Lf -o /plugins/apoc-5.26.28-core.jar \
+  https://github.com/neo4j/apoc/releases/download/5.26.28/apoc-5.26.28-core.jar
 
-# GDS 2.23.0 has compatibility issues with Neo4j 2025.10.1
+# GDS 2.23.0 has compatibility issues with this Neo4j line.
 # Commenting out until a compatible version is released
 # curl -Lf -o /plugins/neo4j-graph-data-science-2.23.0.jar \
 #   https://github.com/neo4j/graph-data-science/releases/download/2.23.0/neo4j-graph-data-science-2.23.0.jar
