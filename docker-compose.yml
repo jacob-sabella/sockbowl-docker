@@ -208,6 +208,9 @@ services:
       KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET}"
       SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-false}"
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
+      # Client-credentials secret for the sockbowl-game-backend service account,
+      # used to authenticate game's server-to-server packet fetch to questions.
+      SOCKBOWL_GAME_BACKEND_SECRET: "${SOCKBOWL_GAME_BACKEND_SECRET}"
     depends_on:
       kafka:
         condition: service_healthy
@@ -238,6 +241,10 @@ services:
       SPRING_AI_OLLAMA_CHAT_OPTIONS_MODEL: "${SPRING_AI_OLLAMA_CHAT_OPTIONS_MODEL}"
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       SOCKBOWL_ALLOWED_ORIGINS: "${SOCKBOWL_QUESTIONS_ALLOWED_ORIGINS}"
+      # Without these, questions falls back to NoSecurityConfig (permitAll) even
+      # when AUTH_ENABLED=true — silently disabling all @PreAuthorize checks.
+      SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
     depends_on:
       neo4j:
         condition: service_healthy
