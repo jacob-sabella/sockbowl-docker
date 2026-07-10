@@ -1,13 +1,14 @@
 {
   "permissionRoles": [
     "packet:read", "packet:create", "packet:update", "packet:delete",
-    "question:generate", "taxonomy:manage", "game:host", "user:ban", "admin:access"
+    "question:generate", "taxonomy:manage", "game:host", "user:ban", "admin:access",
+    "packet:manage-any"
   ],
   "compositeRoles": {
     "player":    ["packet:read", "game:host"],
-    "author":    ["player", "packet:create", "packet:update", "question:generate", "taxonomy:manage"],
+    "author":    ["player", "packet:create", "packet:update", "packet:delete", "question:generate", "taxonomy:manage"],
     "moderator": ["player", "user:ban"],
-    "admin":     ["author", "moderator", "packet:delete", "admin:access"],
+    "admin":     ["author", "moderator", "packet:delete", "admin:access", "packet:manage-any"],
     "user":      ["player"]
   },
   "defaultRole": "player",
