@@ -88,6 +88,9 @@ services:
     command: start-dev --import-realm
     volumes:
       - keycloak_import:/opt/keycloak/data/import
+      # Sockbowl-branded login theme (referenced by realm loginTheme=sockbowl).
+      # start-dev disables theme caching, so edits show on the next page load.
+      - ./keycloak/themes/sockbowl:/opt/keycloak/themes/sockbowl:ro
     depends_on:
       postgres:
         condition: service_healthy

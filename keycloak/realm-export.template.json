@@ -1,6 +1,9 @@
 {
   "realm": "sockbowl",
   "enabled": true,
+  "displayName": "Sockbowl",
+  "displayNameHtml": "Sockbowl",
+  "loginTheme": "sockbowl",
   "sslRequired": "none",
   "ssoSessionIdleTimeout": 3600,
   "ssoSessionMaxLifespan": 36000,

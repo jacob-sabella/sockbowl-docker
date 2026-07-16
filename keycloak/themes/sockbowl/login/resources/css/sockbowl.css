@@ -1,0 +1,400 @@
+/*
+ * Sockbowl — Keycloak login theme
+ *
+ * A brand layer over the stock "keycloak" login theme. Mirrors the app's default
+ * dark theme so the redirect to Keycloak reads as a continuation of the landing
+ * lobby, not a jarring hand-off to a generic identity server.
+ *
+ * Design tokens are copied (not imported) from sockbowl-ng's dark theme — the
+ * Keycloak page can't see the app's CSS variables, so the source of truth is
+ * duplicated here intentionally. Values: bg #0a0e1a, surface #1f2937,
+ * accent #6366f1, fonts Space Grotesk (display) / Inter (body).
+ *
+ * Everything is applied to the base theme's existing DOM — no template overrides
+ * — so a PatternFly class rename at worst degrades to the base look. Selectors
+ * cover both PF v4 (.pf-c-*) and v5 (.pf-v5-c-*) prefixes for that reason.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  --sb-bg: #0a0e1a;
+  --sb-bg-2: #111827;
+  --sb-surface: #1f2937;
+  --sb-surface-hover: #374151;
+  --sb-text: #f9fafb;
+  --sb-text-secondary: #d1d5db;
+  --sb-text-muted: #9ca3af;
+  --sb-accent: #6366f1;
+  --sb-accent-hover: #818cf8;
+  --sb-accent-2: #8b5cf6;
+  --sb-border: rgba(107, 114, 128, 0.35);
+  --sb-border-strong: rgba(156, 163, 175, 0.5);
+  --sb-glow: rgba(99, 102, 241, 0.45);
+  --sb-error: #ef4444;
+  --sb-success: #10b981;
+  --sb-font-display: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --sb-font-body: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --sb-radius: 20px;
+  --sb-radius-sm: 10px;
+}
+
+/* ===== Canvas: deep blue-gray with a soft indigo glow, like the lobby hero ===== */
+html {
+  height: 100%;
+}
+
+body.login-pf,
+body {
+  height: 100%;
+  margin: 0;
+  color: var(--sb-text);
+  font-family: var(--sb-font-body);
+  background: var(--sb-bg);
+}
+
+/* The base theme paints a full-page photo on this element; replace it with the
+   Sockbowl gradient field (two indigo/violet glows fading into the dark base). */
+.login-pf body,
+body.login-pf {
+  background:
+    radial-gradient(1100px 600px at 50% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
+    radial-gradient(900px 600px at 85% 110%, rgba(139, 92, 246, 0.14), transparent 55%),
+    var(--sb-bg);
+  background-attachment: fixed;
+}
+
+.login-pf-page {
+  padding-top: clamp(2rem, 8vh, 6rem);
+  max-width: 480px;
+}
+
+/* ===== Brand header: mark + "Sockbowl" wordmark + tagline =====
+   The wordmark text is the realm displayNameHtml the base template renders into
+   #kc-header-wrapper; we style that text and hang the mark and tagline off it. */
+#kc-header {
+  width: 100%;
+  margin-bottom: 1.75rem;
+  color: var(--sb-text);
+}
+
+#kc-header-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  font-family: var(--sb-font-display);
+  font-size: clamp(2.4rem, 8vw, 3rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--sb-text);
+  text-transform: none;
+  white-space: normal;
+}
+
+/* Gamepad mark, rendered above the wordmark (Material "sports_esports", indigo). */
+#kc-header-wrapper::before {
+  content: "";
+  width: 56px;
+  height: 56px;
+  margin-bottom: 0.4rem;
+  background: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzYzNjZmMSI+PHBhdGggZD0iTTIxLjU4IDE2LjA5bC0xLjA5LTcuNjZDMjAuMjEgNi40NiAxOC41MiA1IDE2LjUzIDVINy40N0M1LjQ4IDUgMy43OSA2LjQ2IDMuNTEgOC40M2wtMS4wOSA3LjY2QzIuMiAxNy42MyAzLjM5IDE5IDQuOTQgMTljLjY4IDAgMS4zMi0uMjcgMS44LS43NUw5IDE2aDZsMi4yNSAyLjI1Yy40OC40OCAxLjEzLjc1IDEuOC43NSAxLjU2IDAgMi43NS0xLjM3IDIuNTMtMi45MXpNMTEgMTFIOXYySDh2LTJINnYtMWgyVjhoMXYyaDJ2MXptNC0xYy0uNTUgMC0xLS40NS0xLTFzLjQ1LTEgMS0xIDEgLjQ1IDEgMS0uNDUgMS0xIDF6bTIgM2MtLjU1IDAtMS0uNDUtMS0xcy40NS0xIDEtMSAxIC40NSAxIDEtLjQ1IDEtMSAxeiIvPjwvc3ZnPg==") center / contain no-repeat;
+  filter: drop-shadow(0 0 18px var(--sb-glow));
+}
+
+/* Tagline, echoing the lobby subtitle. */
+#kc-header-wrapper::after {
+  content: "Live quiz-bowl, judged the moment you type.";
+  font-family: var(--sb-font-body);
+  font-size: 0.9rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  color: var(--sb-text-muted);
+}
+
+/* ===== Card: elevated dark surface with a hairline border ===== */
+.login-pf-page .card-pf,
+.login-pf-page .card-pf.card-pf-view-single,
+#kc-content .card-pf {
+  margin: 0 auto;
+  padding: 2rem 2rem 2.25rem;
+  background: linear-gradient(180deg, rgba(31, 41, 55, 0.9), rgba(17, 24, 39, 0.92));
+  border: 1px solid var(--sb-border);
+  border-radius: var(--sb-radius);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(99, 102, 241, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(6px);
+}
+
+/* Page title ("Sign in", "Register", …) */
+#kc-page-title {
+  margin: 0 0 1.25rem;
+  font-family: var(--sb-font-display);
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--sb-text);
+  text-align: center;
+}
+
+/* ===== Form fields ===== */
+.pf-c-form__label,
+.pf-v5-c-form__label,
+#kc-form-login label,
+label {
+  color: var(--sb-text-secondary);
+  font-family: var(--sb-font-body);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+input[type="tel"],
+select,
+textarea,
+.pf-c-form-control,
+.pf-v5-c-form-control,
+input.pf-c-form-control,
+input.pf-v5-c-form-control {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.7rem 0.85rem;
+  background: rgba(10, 14, 26, 0.7);
+  color: var(--sb-text);
+  font-family: var(--sb-font-body);
+  font-size: 0.95rem;
+  border: 1px solid var(--sb-border);
+  border-radius: var(--sb-radius-sm);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--sb-text-muted);
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus,
+input[type="number"]:focus,
+input[type="tel"]:focus,
+select:focus,
+textarea:focus,
+.pf-c-form-control:focus,
+.pf-v5-c-form-control:focus {
+  outline: none;
+  border-color: var(--sb-accent);
+  background: rgba(10, 14, 26, 0.9);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+}
+
+/* Show/hide password toggle sits inside the field */
+.pf-c-input-group,
+.pf-v5-c-input-group {
+  background: transparent;
+}
+
+.pf-c-button.pf-m-control,
+.pf-v5-c-button.pf-m-control {
+  background: rgba(10, 14, 26, 0.7);
+  border: 1px solid var(--sb-border);
+  border-left: none;
+  color: var(--sb-text-muted);
+  border-radius: 0 var(--sb-radius-sm) var(--sb-radius-sm) 0;
+}
+
+/* ===== Primary button: indigo with a gentle glow on hover ===== */
+input[type="submit"],
+button[type="submit"],
+#kc-login,
+.pf-c-button.pf-m-primary,
+.pf-v5-c-button.pf-m-primary,
+.pf-c-button.pf-m-block,
+.pf-v5-c-button.pf-m-block {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: linear-gradient(180deg, var(--sb-accent), #4f46e5);
+  color: #fff;
+  font-family: var(--sb-font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: none;
+  border-radius: var(--sb-radius-sm);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, background 0.2s ease;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.35);
+}
+
+input[type="submit"]:hover,
+button[type="submit"]:hover,
+#kc-login:hover,
+.pf-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:hover {
+  background: linear-gradient(180deg, var(--sb-accent-hover), var(--sb-accent));
+  box-shadow: 0 10px 30px var(--sb-glow), 0 0 0 1px rgba(129, 140, 248, 0.4);
+  transform: translateY(-1px);
+}
+
+input[type="submit"]:active,
+button[type="submit"]:active,
+#kc-login:active {
+  transform: translateY(0);
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.4);
+}
+
+/* Secondary / link-style buttons */
+.pf-c-button.pf-m-secondary,
+.pf-v5-c-button.pf-m-secondary {
+  background: transparent;
+  color: var(--sb-text-secondary);
+  border: 1px solid var(--sb-border-strong);
+  border-radius: var(--sb-radius-sm);
+}
+
+.pf-c-button.pf-m-secondary:hover,
+.pf-v5-c-button.pf-m-secondary:hover {
+  background: var(--sb-surface-hover);
+  color: var(--sb-text);
+}
+
+/* ===== Links (register, forgot password, back-to-app) ===== */
+a,
+#kc-registration a,
+#kc-info-wrapper a,
+.pf-c-button.pf-m-link,
+.pf-v5-c-button.pf-m-link {
+  color: var(--sb-accent-hover);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+a:hover,
+#kc-registration a:hover,
+#kc-info-wrapper a:hover {
+  color: #a5b4fc;
+  text-decoration: underline;
+}
+
+/* ===== Registration / info footer under the card ===== */
+#kc-registration,
+#kc-info,
+#kc-info-wrapper {
+  margin-top: 1.25rem;
+  color: var(--sb-text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+/* "Remember me" row */
+#kc-form-options,
+.checkbox label {
+  color: var(--sb-text-muted);
+  font-size: 0.85rem;
+}
+
+#kc-form-options a {
+  font-size: 0.85rem;
+}
+
+/* ===== Alerts / feedback messages ===== */
+.alert,
+.pf-c-alert,
+.pf-v5-c-alert {
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--sb-radius-sm);
+  border: 1px solid var(--sb-border);
+  background: var(--sb-surface);
+  color: var(--sb-text-secondary);
+  font-size: 0.9rem;
+}
+
+.alert-error,
+.pf-c-alert.pf-m-danger,
+.pf-v5-c-alert.pf-m-danger,
+.pf-m-error {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+
+.alert-success,
+.pf-c-alert.pf-m-success,
+.pf-v5-c-alert.pf-m-success {
+  border-color: rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+}
+
+.alert-warning,
+.pf-c-alert.pf-m-warning,
+.pf-v5-c-alert.pf-m-warning {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+
+/* Inline field validation text */
+.pf-c-form__helper-text.pf-m-error,
+.pf-v5-c-form__helper-text.pf-m-error,
+#input-error,
+.kc-feedback-text {
+  color: #fca5a5;
+  font-size: 0.8rem;
+}
+
+/* ===== Social / identity-provider buttons, if the realm ever adds them ===== */
+#kc-social-providers a,
+.pf-c-button.kc-social-item,
+#social-providers a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.65rem 1rem;
+  background: var(--sb-surface);
+  color: var(--sb-text);
+  border: 1px solid var(--sb-border);
+  border-radius: var(--sb-radius-sm);
+}
+
+#kc-social-providers a:hover {
+  background: var(--sb-surface-hover);
+  text-decoration: none;
+}
+
+/* ===== Language picker (top-right) ===== */
+#kc-locale ul {
+  background: var(--sb-surface);
+  border: 1px solid var(--sb-border);
+  border-radius: var(--sb-radius-sm);
+}
+
+#kc-locale a {
+  color: var(--sb-text-secondary);
+}
+
+/* ===== Small screens ===== */
+@media (max-width: 520px) {
+  .login-pf-page {
+    padding-top: 2rem;
+  }
+  .login-pf-page .card-pf {
+    padding: 1.5rem 1.25rem 1.75rem;
+    border-radius: 16px;
+  }
+  #kc-header-wrapper {
+    font-size: 2.2rem;
+  }
+}
