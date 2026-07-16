@@ -1,22 +1,24 @@
 /*
  * Sockbowl — Keycloak login theme
  *
- * A brand layer over the stock "keycloak" login theme. Mirrors the app's default
- * dark theme so the redirect to Keycloak reads as a continuation of the landing
- * lobby, not a jarring hand-off to a generic identity server.
+ * A brand layer over the stock "keycloak" login theme. Mirrors the app's own
+ * theme system so the redirect to Keycloak reads as a continuation of the app.
  *
- * Design tokens are copied (not imported) from sockbowl-ng's dark theme — the
- * Keycloak page can't see the app's CSS variables, so the source of truth is
- * duplicated here intentionally. Values: bg #0a0e1a, surface #1f2937,
- * accent #6366f1, fonts Space Grotesk (display) / Inter (body).
+ * Multi-theme: the login page follows whichever theme the user picked in the
+ * SPA. The app passes it through the sign-in redirect as ?ui_theme=<name>;
+ * js/theme-switch.js stamps that onto <html data-sb-theme="...">, and the
+ * palette blocks below re-point the --sb-* tokens to match. Default (no param)
+ * is dark. Palette values are copied from sockbowl-ng's theme stylesheets —
+ * keep them in sync if the app's themes change.
  *
- * Everything is applied to the base theme's existing DOM — no template overrides
- * — so a PatternFly class rename at worst degrades to the base look. Selectors
- * cover both PF v4 (.pf-c-*) and v5 (.pf-v5-c-*) prefixes for that reason.
+ * Everything styles the base theme's existing DOM — no template overrides for
+ * login — so a PatternFly class rename degrades to the base look. Selectors
+ * cover both PF v4 (.pf-c-*) and v5 (.pf-v5-c-*) prefixes.
  */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
 
+/* ===== Default palette: dark ===== */
 :root {
   --sb-bg: #0a0e1a;
   --sb-bg-2: #111827;
@@ -33,13 +35,73 @@
   --sb-glow: rgba(99, 102, 241, 0.45);
   --sb-error: #ef4444;
   --sb-success: #10b981;
+
+  /* Derived tokens — resolved at use time, so they follow the palette above.
+     Input surface = page bg (darker than the card on dark themes, white on
+     light themes); focus ring + glows are mixed from the live accent. */
+  --sb-input-bg: var(--sb-bg);
+  --sb-focus-ring: color-mix(in srgb, var(--sb-accent) 32%, transparent);
+  --sb-glow-a: color-mix(in srgb, var(--sb-accent) 20%, transparent);
+  --sb-glow-b: color-mix(in srgb, var(--sb-accent-2) 16%, transparent);
+
   --sb-font-display: 'Space Grotesk', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --sb-font-body: 'Inter', 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
   --sb-radius: 20px;
   --sb-radius-sm: 10px;
 }
 
-/* ===== Canvas: deep blue-gray with a soft indigo glow, like the lobby hero ===== */
+/* ===== Per-theme palettes (mirror sockbowl-ng/src/styles/themes) ===== */
+:root[data-sb-theme="light"] {
+  --sb-bg: #ffffff; --sb-bg-2: #f9fafb; --sb-surface: #ffffff; --sb-surface-hover: #f3f4f6;
+  --sb-text: #111827; --sb-text-secondary: #4b5563; --sb-text-muted: #6b7280;
+  --sb-accent: #4f46e5; --sb-accent-hover: #6366f1; --sb-accent-2: #7c3aed;
+  --sb-border: rgba(229, 231, 235, 0.8); --sb-border-strong: rgba(156, 163, 175, 1);
+  --sb-glow: rgba(79, 70, 229, 0.2); --sb-error: #dc2626; --sb-success: #059669;
+}
+:root[data-sb-theme="nord"] {
+  --sb-bg: #2E3440; --sb-bg-2: #3B4252; --sb-surface: #3B4252; --sb-surface-hover: #434C5E;
+  --sb-text: #ECEFF4; --sb-text-secondary: #E5E9F0; --sb-text-muted: #D8DEE9;
+  --sb-accent: #88C0D0; --sb-accent-hover: #8FBCBB; --sb-accent-2: #81A1C1;
+  --sb-border: rgba(76, 86, 106, 0.3); --sb-border-strong: rgba(76, 86, 106, 0.7);
+  --sb-glow: rgba(136, 192, 208, 0.3); --sb-error: #BF616A; --sb-success: #A3BE8C;
+}
+:root[data-sb-theme="monokai"] {
+  --sb-bg: #272822; --sb-bg-2: #3E3D32; --sb-surface: #3E3D32; --sb-surface-hover: #49483E;
+  --sb-text: #F8F8F2; --sb-text-secondary: #CFCFC2; --sb-text-muted: #9D9D8E;
+  --sb-accent: #66D9EF; --sb-accent-hover: #7FE3F7; --sb-accent-2: #AE81FF;
+  --sb-border: rgba(73, 72, 62, 0.3); --sb-border-strong: rgba(73, 72, 62, 0.7);
+  --sb-glow: rgba(102, 217, 239, 0.3); --sb-error: #F92672; --sb-success: #A6E22E;
+}
+:root[data-sb-theme="catppuccin"] {
+  --sb-bg: #1e1e2e; --sb-bg-2: #181825; --sb-surface: #181825; --sb-surface-hover: #313244;
+  --sb-text: #cdd6f4; --sb-text-secondary: #bac2de; --sb-text-muted: #a6adc8;
+  --sb-accent: #89b4fa; --sb-accent-hover: #a6c9ff; --sb-accent-2: #cba6f7;
+  --sb-border: rgba(49, 50, 68, 0.3); --sb-border-strong: rgba(69, 71, 90, 0.7);
+  --sb-glow: rgba(137, 180, 250, 0.3); --sb-error: #f38ba8; --sb-success: #a6e3a1;
+}
+:root[data-sb-theme="dracula"] {
+  --sb-bg: #282a36; --sb-bg-2: #21222c; --sb-surface: #21222c; --sb-surface-hover: #44475a;
+  --sb-text: #f8f8f2; --sb-text-secondary: #bfbfbf; --sb-text-muted: #6272a4;
+  --sb-accent: #bd93f9; --sb-accent-hover: #d4bfff; --sb-accent-2: #ff79c6;
+  --sb-border: rgba(68, 71, 90, 0.3); --sb-border-strong: rgba(98, 114, 164, 0.6);
+  --sb-glow: rgba(189, 147, 249, 0.3); --sb-error: #ff5555; --sb-success: #50fa7b;
+}
+:root[data-sb-theme="solarized-dark"] {
+  --sb-bg: #002b36; --sb-bg-2: #073642; --sb-surface: #073642; --sb-surface-hover: #0d4451;
+  --sb-text: #fdf6e3; --sb-text-secondary: #93a1a1; --sb-text-muted: #586e75;
+  --sb-accent: #268bd2; --sb-accent-hover: #3fa5f5; --sb-accent-2: #6c71c4;
+  --sb-border: rgba(7, 54, 66, 0.3); --sb-border-strong: rgba(22, 82, 97, 0.7);
+  --sb-glow: rgba(38, 139, 210, 0.3); --sb-error: #dc322f; --sb-success: #859900;
+}
+:root[data-sb-theme="solarized-light"] {
+  --sb-bg: #fdf6e3; --sb-bg-2: #eee8d5; --sb-surface: #fdf6e3; --sb-surface-hover: #eee8d5;
+  --sb-text: #002b36; --sb-text-secondary: #657b83; --sb-text-muted: #839496;
+  --sb-accent: #268bd2; --sb-accent-hover: #1a75b8; --sb-accent-2: #6c71c4;
+  --sb-border: rgba(238, 232, 213, 0.8); --sb-border-strong: rgba(147, 161, 161, 0.5);
+  --sb-glow: rgba(38, 139, 210, 0.2); --sb-error: #dc322f; --sb-success: #859900;
+}
+
+/* ===== Canvas: theme bg with a soft accent glow ===== */
 html {
   height: 100%;
 }
@@ -53,13 +115,11 @@ body {
   background: var(--sb-bg);
 }
 
-/* The base theme paints a full-page photo on this element; replace it with the
-   Sockbowl gradient field (two indigo/violet glows fading into the dark base). */
 .login-pf body,
 body.login-pf {
   background:
-    radial-gradient(1100px 600px at 50% -10%, rgba(99, 102, 241, 0.18), transparent 60%),
-    radial-gradient(900px 600px at 85% 110%, rgba(139, 92, 246, 0.14), transparent 55%),
+    radial-gradient(1100px 600px at 50% -10%, var(--sb-glow-a), transparent 60%),
+    radial-gradient(900px 600px at 85% 110%, var(--sb-glow-b), transparent 55%),
     var(--sb-bg);
   background-attachment: fixed;
 }
@@ -75,9 +135,9 @@ body.login-pf {
   margin-right: auto;
 }
 
-/* ===== Brand header: mark + "Sockbowl" wordmark + tagline =====
+/* ===== Brand header: mark + "Sockbowl" wordmark =====
    The wordmark text is the realm displayNameHtml the base template renders into
-   #kc-header-wrapper; we style that text and hang the mark and tagline off it. */
+   #kc-header-wrapper; we style that text and hang the mark off it. */
 #kc-header {
   width: 100%;
   margin-bottom: 1.75rem;
@@ -100,33 +160,33 @@ body.login-pf {
   white-space: normal;
 }
 
-/* Gamepad mark, rendered above the wordmark (Material "sports_esports", indigo). */
+/* Gamepad mark (Material "sports_esports"), tinted to the live accent via a
+   mask so it recolors per theme instead of being locked to indigo. */
 #kc-header-wrapper::before {
   content: "";
   width: 56px;
   height: 56px;
   margin-bottom: 0.4rem;
-  background: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzYzNjZmMSI+PHBhdGggZD0iTTIxLjU4IDE2LjA5bC0xLjA5LTcuNjZDMjAuMjEgNi40NiAxOC41MiA1IDE2LjUzIDVINy40N0M1LjQ4IDUgMy43OSA2LjQ2IDMuNTEgOC40M2wtMS4wOSA3LjY2QzIuMiAxNy42MyAzLjM5IDE5IDQuOTQgMTljLjY4IDAgMS4zMi0uMjcgMS44LS43NUw5IDE2aDZsMi4yNSAyLjI1Yy40OC40OCAxLjEzLjc1IDEuOC43NSAxLjU2IDAgMi43NS0xLjM3IDIuNTMtMi45MXpNMTEgMTFIOXYySDh2LTJINnYtMWgyVjhoMXYyaDJ2MXptNC0xYy0uNTUgMC0xLS40NS0xLTFzLjQ1LTEgMS0xIDEgLjQ1IDEgMS0uNDUgMS0xIDF6bTIgM2MtLjU1IDAtMS0uNDUtMS0xcy40NS0xIDEtMSAxIC40NSAxIDEtLjQ1IDEtMSAxeiIvPjwvc3ZnPg==") center / contain no-repeat;
+  background-color: var(--sb-accent);
+  -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTIxLjU4IDE2LjA5bC0xLjA5LTcuNjZDMjAuMjEgNi40NiAxOC41MiA1IDE2LjUzIDVINy40N0M1LjQ4IDUgMy43OSA2LjQ2IDMuNTEgOC40M2wtMS4wOSA3LjY2QzIuMiAxNy42MyAzLjM5IDE5IDQuOTQgMTljLjY4IDAgMS4zMi0uMjcgMS44LS43NUw5IDE2aDZsMi4yNSAyLjI1Yy40OC40OCAxLjEzLjc1IDEuOC43NSAxLjU2IDAgMi43NS0xLjM3IDIuNTMtMi45MXpNMTEgMTFIOXYySDh2LTJINnYtMWgyVjhoMXYyaDJ2MXptNC0xYy0uNTUgMC0xLS40NS0xLTFzLjQ1LTEgMS0xIDEgLjQ1IDEgMS0uNDUgMS0xIDF6bTIgM2MtLjU1IDAtMS0uNDUtMS0xcy40NS0xIDEtMSAxIC40NSAxIDEtLjQ1IDEtMSAxeiIvPjwvc3ZnPg==") center / contain no-repeat;
+  mask: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZD0iTTIxLjU4IDE2LjA5bC0xLjA5LTcuNjZDMjAuMjEgNi40NiAxOC41MiA1IDE2LjUzIDVINy40N0M1LjQ4IDUgMy43OSA2LjQ2IDMuNTEgOC40M2wtMS4wOSA3LjY2QzIuMiAxNy42MyAzLjM5IDE5IDQuOTQgMTljLjY4IDAgMS4zMi0uMjcgMS44LS43NUw5IDE2aDZsMi4yNSAyLjI1Yy40OC40OCAxLjEzLjc1IDEuOC43NSAxLjU2IDAgMi43NS0xLjM3IDIuNTMtMi45MXpNMTEgMTFIOXYySDh2LTJINnYtMWgyVjhoMXYyaDJ2MXptNC0xYy0uNTUgMC0xLS40NS0xLTFzLjQ1LTEgMS0xIDEgLjQ1IDEgMS0uNDUgMS0xIDF6bTIgM2MtLjU1IDAtMS0uNDUtMS0xcy40NS0xIDEtMSAxIC40NSAxIDEtLjQ1IDEtMSAxeiIvPjwvc3ZnPg==") center / contain no-repeat;
   filter: drop-shadow(0 0 18px var(--sb-glow));
 }
 
-/* ===== Card: elevated dark surface with a hairline border ===== */
+/* ===== Card: elevated surface with a hairline border ===== */
 .login-pf-page .card-pf,
 .login-pf-page .card-pf.card-pf-view-single,
 #kc-content .card-pf {
   margin: 0 auto;
   padding: 2rem 2rem 2.25rem;
-  background: linear-gradient(180deg, rgba(31, 41, 55, 0.9), rgba(17, 24, 39, 0.92));
+  background: var(--sb-surface);
   border: 1px solid var(--sb-border);
   border-radius: var(--sb-radius);
   box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.45),
-    0 0 0 1px rgba(99, 102, 241, 0.06),
+    0 20px 60px rgba(0, 0, 0, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  backdrop-filter: blur(6px);
 }
 
-/* Page title ("Sign in", "Register", …) */
 #kc-page-title {
   margin: 0 0 1.25rem;
   font-family: var(--sb-font-display);
@@ -162,7 +222,7 @@ input.pf-v5-c-form-control {
   width: 100%;
   box-sizing: border-box;
   padding: 0.7rem 0.85rem;
-  background: rgba(10, 14, 26, 0.7);
+  background: var(--sb-input-bg);
   color: var(--sb-text);
   font-family: var(--sb-font-body);
   font-size: 0.95rem;
@@ -187,11 +247,9 @@ textarea:focus,
 .pf-v5-c-form-control:focus {
   outline: none;
   border-color: var(--sb-accent);
-  background: rgba(10, 14, 26, 0.9);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 0 0 3px var(--sb-focus-ring);
 }
 
-/* Show/hide password toggle sits inside the field */
 .pf-c-input-group,
 .pf-v5-c-input-group {
   background: transparent;
@@ -199,14 +257,14 @@ textarea:focus,
 
 .pf-c-button.pf-m-control,
 .pf-v5-c-button.pf-m-control {
-  background: rgba(10, 14, 26, 0.7);
+  background: var(--sb-input-bg);
   border: 1px solid var(--sb-border);
   border-left: none;
   color: var(--sb-text-muted);
   border-radius: 0 var(--sb-radius-sm) var(--sb-radius-sm) 0;
 }
 
-/* ===== Primary button: indigo with a gentle glow on hover ===== */
+/* ===== Primary button: accent fill with a gentle glow on hover ===== */
 input[type="submit"],
 button[type="submit"],
 #kc-login,
@@ -217,7 +275,7 @@ button[type="submit"],
   width: 100%;
   margin-top: 0.5rem;
   padding: 0.75rem 1rem;
-  background: linear-gradient(180deg, var(--sb-accent), #4f46e5);
+  background: var(--sb-accent);
   color: #fff;
   font-family: var(--sb-font-display);
   font-size: 1rem;
@@ -227,7 +285,7 @@ button[type="submit"],
   border-radius: var(--sb-radius-sm);
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.2s ease, background 0.2s ease;
-  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.35);
+  box-shadow: 0 8px 24px var(--sb-glow);
 }
 
 input[type="submit"]:hover,
@@ -235,8 +293,8 @@ button[type="submit"]:hover,
 #kc-login:hover,
 .pf-c-button.pf-m-primary:hover,
 .pf-v5-c-button.pf-m-primary:hover {
-  background: linear-gradient(180deg, var(--sb-accent-hover), var(--sb-accent));
-  box-shadow: 0 10px 30px var(--sb-glow), 0 0 0 1px rgba(129, 140, 248, 0.4);
+  background: var(--sb-accent-hover);
+  box-shadow: 0 10px 30px var(--sb-glow), 0 0 0 1px var(--sb-accent-hover);
   transform: translateY(-1px);
 }
 
@@ -244,10 +302,8 @@ input[type="submit"]:active,
 button[type="submit"]:active,
 #kc-login:active {
   transform: translateY(0);
-  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.4);
 }
 
-/* Secondary / link-style buttons */
 .pf-c-button.pf-m-secondary,
 .pf-v5-c-button.pf-m-secondary {
   background: transparent;
@@ -262,7 +318,7 @@ button[type="submit"]:active,
   color: var(--sb-text);
 }
 
-/* ===== Links (register, forgot password, back-to-app) ===== */
+/* ===== Links ===== */
 a,
 #kc-registration a,
 #kc-info-wrapper a,
@@ -277,14 +333,13 @@ a,
 a:hover,
 #kc-registration a:hover,
 #kc-info-wrapper a:hover {
-  color: #a5b4fc;
+  color: var(--sb-accent);
   text-decoration: underline;
 }
 
-/* ===== Registration / info footer under the card =====
+/* ===== Registration / info footer =====
    Base keycloak renders #kc-info as a light "login-pf-signup" band at the foot
-   of the card; strip that background so it blends into the dark card instead of
-   flashing white, and separate it with a hairline. */
+   of the card; strip that background so it blends into the card, with a hairline. */
 #kc-registration,
 #kc-info,
 #kc-info-wrapper,
@@ -303,7 +358,6 @@ a:hover,
   box-shadow: none;
 }
 
-/* "Remember me" row */
 #kc-form-options,
 .checkbox label {
   color: var(--sb-text-muted);
@@ -314,7 +368,7 @@ a:hover,
   font-size: 0.85rem;
 }
 
-/* ===== Alerts / feedback messages ===== */
+/* ===== Alerts / feedback ===== */
 .alert,
 .pf-c-alert,
 .pf-v5-c-alert {
@@ -322,7 +376,7 @@ a:hover,
   padding: 0.75rem 1rem;
   border-radius: var(--sb-radius-sm);
   border: 1px solid var(--sb-border);
-  background: var(--sb-surface);
+  background: var(--sb-surface-hover);
   color: var(--sb-text-secondary);
   font-size: 0.9rem;
 }
@@ -331,37 +385,28 @@ a:hover,
 .pf-c-alert.pf-m-danger,
 .pf-v5-c-alert.pf-m-danger,
 .pf-m-error {
-  border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.12);
-  color: #fca5a5;
+  border-color: color-mix(in srgb, var(--sb-error) 50%, transparent);
+  background: color-mix(in srgb, var(--sb-error) 14%, transparent);
+  color: var(--sb-error);
 }
 
 .alert-success,
 .pf-c-alert.pf-m-success,
 .pf-v5-c-alert.pf-m-success {
-  border-color: rgba(16, 185, 129, 0.5);
-  background: rgba(16, 185, 129, 0.12);
-  color: #6ee7b7;
+  border-color: color-mix(in srgb, var(--sb-success) 50%, transparent);
+  background: color-mix(in srgb, var(--sb-success) 14%, transparent);
+  color: var(--sb-success);
 }
 
-.alert-warning,
-.pf-c-alert.pf-m-warning,
-.pf-v5-c-alert.pf-m-warning {
-  border-color: rgba(245, 158, 11, 0.5);
-  background: rgba(245, 158, 11, 0.12);
-  color: #fcd34d;
-}
-
-/* Inline field validation text */
 .pf-c-form__helper-text.pf-m-error,
 .pf-v5-c-form__helper-text.pf-m-error,
 #input-error,
 .kc-feedback-text {
-  color: #fca5a5;
+  color: var(--sb-error);
   font-size: 0.8rem;
 }
 
-/* ===== Social / identity-provider buttons, if the realm ever adds them ===== */
+/* ===== Social / identity-provider buttons ===== */
 #kc-social-providers a,
 .pf-c-button.kc-social-item,
 #social-providers a {
@@ -371,7 +416,7 @@ a:hover,
   gap: 0.5rem;
   margin-top: 0.5rem;
   padding: 0.65rem 1rem;
-  background: var(--sb-surface);
+  background: var(--sb-surface-hover);
   color: var(--sb-text);
   border: 1px solid var(--sb-border);
   border-radius: var(--sb-radius-sm);
@@ -379,10 +424,11 @@ a:hover,
 
 #kc-social-providers a:hover {
   background: var(--sb-surface-hover);
+  border-color: var(--sb-border-strong);
   text-decoration: none;
 }
 
-/* ===== Language picker (top-right) ===== */
+/* ===== Language picker ===== */
 #kc-locale ul {
   background: var(--sb-surface);
   border: 1px solid var(--sb-border);
