@@ -3,6 +3,7 @@ services:
     image: apache/kafka:4.0.2
     container_name: kafka
     network_mode: "host"
+    restart: unless-stopped
     environment:
       - KAFKA_NODE_ID=1
       - KAFKA_PROCESS_ROLES=broker,controller
@@ -33,6 +34,7 @@ services:
     image: postgres:17
     container_name: postgres
     network_mode: "host"
+    restart: unless-stopped
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -72,6 +74,7 @@ services:
     image: quay.io/keycloak/keycloak:26.6.4
     container_name: keycloak
     network_mode: "host"
+    restart: unless-stopped
     environment:
       # KC 26 renamed the bootstrap admin vars; keep legacy ones for back-compat.
       - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN}
@@ -143,6 +146,7 @@ services:
     image: redis/redis-stack-server:7.4.0-v8
     container_name: redis
     network_mode: "host"
+    restart: unless-stopped
     volumes:
       - redis_data:/data
     healthcheck:
@@ -156,6 +160,7 @@ services:
     image: neo4j:5.26
     container_name: neo4j
     network_mode: "host"
+    restart: unless-stopped
     depends_on:
       neo4j-plugin-init:
         condition: service_completed_successfully
@@ -196,6 +201,7 @@ services:
     # starts infra only (run game/questions/ng from source for local dev).
     profiles: ["full"]
     network_mode: "host"
+    restart: unless-stopped
     environment:
       SOCKBOWL_DATABASE: 0
       SOCKBOWL_KAFKA_BOOTSTRAP_SERVERS: "${APP_HOST}:${KAFKA_PORT}"
@@ -231,6 +237,7 @@ services:
     container_name: sockbowl-questions
     profiles: ["full"]
     network_mode: "host"
+    restart: unless-stopped
     environment:
       SOCKBOWL_NEO4J_USER: "${NEO4J_USER}"
       SOCKBOWL_NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
@@ -261,6 +268,7 @@ services:
     container_name: sockbowl-ng
     profiles: ["full"]
     network_mode: "host"
+    restart: unless-stopped
     environment:
       - APP_HOST=${APP_HOST}
       - APP_PROTOCOL=${APP_PROTOCOL}
