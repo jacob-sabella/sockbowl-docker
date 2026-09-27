@@ -6,7 +6,6 @@ Sockbowl Docker provides scripts and containerization assets to set up the Sockb
 
 - **Centralized Configuration:** Single `.env` file to configure all services with a root host and protocol settings
 - **Runtime Environment Config:** Angular frontend (sockbowl-ng) supports runtime configuration via environment variables—no rebuild needed
-- **Redis Modules:** Shell script to copy essential Redis modules (`redisearch.so`, `rejson.so`) for advanced queries and JSON support
 - **Neo4j Plugins:** Automated download and configuration of Neo4j plugins (APOC, Graph Data Science)
 - **Neo4j Initialization:** Script to automatically import base data into Neo4j if not already present
 - **Container-Ready:** Designed for use in Docker containers and CI/CD pipelines
@@ -154,14 +153,13 @@ than just the image tag.
 
 ### Script Usage
 
-- Run `scripts/download-redis-modules.sh` within a Redis container to copy modules
 - Run `scripts/download-neo4j-plugins.sh` in a Neo4j container to download plugins and update config
 - Run `scripts/init-neo4j.sh` to initialize Neo4j with base packet data
 
 ## Requirements
 
 - Docker and Docker Compose
-- Redis Stack
+- Redis 8.x (Search/JSON/Bloom/TimeSeries are built in; no separate Stack image needed)
 - Neo4j
 
 ## License

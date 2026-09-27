@@ -142,9 +142,12 @@ services:
     restart: "no"
 
   redis:
-    # redis-stack-server bundles RediSearch + RedisJSON (required by Redis OM Spring 2.x)
-    # and auto-loads them, so no manual --loadmodule flags are needed.
-    image: redis/redis-stack-server:7.4.0-v8
+    # Redis Open Source 8 bundles Search/JSON (and Bloom/TimeSeries) as built-in
+    # capabilities, replacing the separate redis-stack-server image; no manual
+    # --loadmodule flags are needed. Verified against a throwaway container
+    # (docker run redis:8.2): FT._LIST, JSON.SET/GET and FT.CREATE ... ON JSON
+    # all work, so Redis OM Spring 2.x's repositories keep working unchanged.
+    image: redis:8.2
     network_mode: "host"
     restart: unless-stopped
     volumes:
