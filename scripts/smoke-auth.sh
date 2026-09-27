@@ -33,7 +33,10 @@
 #   SOCKBOWL_QUESTIONS_PORT, DEMO_PASSWORD, SOCKBOWL_GAME_BACKEND_SECRET
 #     (required: the stack's rbac-init rotates the sockbowl-game-backend
 #     secret to this value on every load-rbac.sh run, so there is no safe
-#     built-in default here).
+#     built-in default here), KEYCLOAK_ISSUER_URI (plan risk #5: a minted
+#     token's `iss` must equal this exactly, or every service's issuer
+#     validation fails; defaults to the same computed URL docker-compose.yml's
+#     KEYCLOAK_ISSUER_URI defaults to).
 #
 # Exit: 0 if every row passed. Prints "PASS:"/"FAIL:"/"SKIP:" lines (this
 # repo's convention; see scripts/test-rbac-reconcile.sh) plus a final table
@@ -56,6 +59,7 @@ DEMO_PASSWORD="${DEMO_PASSWORD:-demo123}"
 
 REALM="sockbowl"
 KC_URL="${APP_PROTOCOL}://${APP_HOST}:${KEYCLOAK_PORT}"
+KEYCLOAK_ISSUER_URI="${KEYCLOAK_ISSUER_URI:-${KC_URL}/realms/${REALM}}"
 GAME_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}"
 QUESTIONS_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}"
 WS_URL="${WS_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}/sockbowl-game"
@@ -149,6 +153,11 @@ else
   failc "minted token's aud claim is '$AUD_CLAIM', expected it to contain sockbowl-api"
 fi
 skip "a token from a client without the audience mapper -> 401 is proved by questions' AudienceIT/JwtAudienceValidationTest (in-JVM Keycloak fixture with a dedicated no-audience client); the real realm has no such client to mint one from without provisioning it just for this check"
+
+# Plan risk #5: a KC_HOSTNAME / KEYCLOAK_ISSUER_URI mismatch fails issuer
+# validation everywhere, silently, on every protected endpoint.
+ISS_CLAIM="$(jwt_claim "$TOKEN_PLAYER" '.iss')"
+expect_eq "minted token iss matches KEYCLOAK_ISSUER_URI (plan risk #5)" "$KEYCLOAK_ISSUER_URI" "$ISS_CLAIM"
 
 echo
 echo "== REST matrix: game (plan section 4.1) =="
