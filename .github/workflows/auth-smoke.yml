@@ -75,7 +75,15 @@ jobs:
           docker compose -p "$COMPOSE_PROJECT" --env-file .env \
             -f docker-compose.yml -f docker-compose.dev.yml \
             --profile full up -d
-          echo "SOCKBOWL_GAME_BACKEND_SECRET=$(grep '^SOCKBOWL_GAME_BACKEND_SECRET=' .env | cut -d= -f2-)" >> "$GITHUB_ENV"
+          # tail -n1: .env.example already has placeholder lines for both of
+          # these, and this appends real ones below them. docker compose's
+          # own --env-file parsing takes the last match for a duplicate key
+          # (confirmed: `docker compose config` resolves to the appended
+          # value), but a plain grep returns both lines, silently corrupting
+          # the var with an embedded newline; tail -n1 picks the same one
+          # compose uses.
+          echo "SOCKBOWL_GAME_BACKEND_SECRET=$(grep '^SOCKBOWL_GAME_BACKEND_SECRET=' .env | tail -n1 | cut -d= -f2-)" >> "$GITHUB_ENV"
+          echo "NEO4J_PASSWORD=$(grep '^NEO4J_PASSWORD=' .env | tail -n1 | cut -d= -f2-)" >> "$GITHUB_ENV"
 
       - name: Wait for the stack to become healthy
         env:
