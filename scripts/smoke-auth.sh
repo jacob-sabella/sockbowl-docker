@@ -219,8 +219,13 @@ req GET "$GAME_URL/api/v1/totally-unmapped-path" "$TOKEN_PLAYER"
 expect_status "deny-by-default: an unmapped path, authenticated -> 403 (never a redirect)" 403 "$CODE"
 
 # --- removed routes (AUTH-08) ---
+# TestController is gone, but /api/v1/test matches no specific matcher below,
+# so it falls into anyRequest().denyAll() — the security filter chain rejects
+# it (401 anonymous) before Spring MVC ever looks for a handler; it's the same
+# deny-by-default bucket as any other unmapped path, not a distinct 404 case
+# (confirmed live: an unmapped path never reaches a 404 dispatch anonymously).
 req GET "$GAME_URL/api/v1/test" ""
-expect_status "removed route /api/v1/test -> 404 (TestController deleted)" 404 "$CODE"
+expect_status "removed route /api/v1/test -> 401, deny-by-default (TestController deleted)" 401 "$CODE"
 req GET "$GAME_URL/login" ""
 expect_status "removed server-side login flow /login -> 401, never a redirect" 401 "$CODE"
 
