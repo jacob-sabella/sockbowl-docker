@@ -156,11 +156,31 @@ than just the image tag.
 - Run `scripts/download-neo4j-plugins.sh` in a Neo4j container to download plugins and update config
 - Run `scripts/init-neo4j.sh` to initialize Neo4j with base packet data
 
+### Ollama embedding model (required even with `SOCKBOWL_AI_PROVIDER=openai`)
+
+`sockbowl-questions` always builds its Neo4j vector store against an Ollama embedding
+model, regardless of `SOCKBOWL_AI_PROVIDER` (that variable only picks the **chat**
+model). With the shipped defaults, the host's Ollama must already have the embedding
+model pulled *before* the stack comes up:
+```bash
+ollama pull mxbai-embed-large
+```
+If it isn't pulled, questions' vector store initialization gets a 404 from Ollama on
+startup and the service never reports healthy (`docker compose ps` sticks on
+`starting`/`unhealthy`), which then blocks `sockbowl-game`'s `depends_on`. This isn't
+currently exposed as its own compose env var — the model name is fixed in
+`sockbowl-questions`' `application.yml` (`spring.ai.ollama.embedding.options.model`,
+currently `mxbai-embed-large`, 1024 dimensions) — so pulling that exact model is the
+only fix on the compose side.
+
 ## Requirements
 
 - Docker and Docker Compose
 - Redis 8.x (Search/JSON/Bloom/TimeSeries are built in; no separate Stack image needed)
 - Neo4j
+- Ollama, with `mxbai-embed-large` pulled (`ollama pull mxbai-embed-large`) — needed
+  for `sockbowl-questions`' vector store even when using the OpenAI chat provider;
+  see "Ollama embedding model" above
 
 ## License
 
