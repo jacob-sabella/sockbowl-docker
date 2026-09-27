@@ -160,7 +160,10 @@ services:
       start_period: 10s
 
   neo4j:
-    image: neo4j:5.26
+    # CalVer line, matched to the apoc/GDS jars scripts/download-neo4j-plugins.sh
+    # fetches. Verified in a throwaway container (neo4j:2026.09 + apoc-2026.09.0 +
+    # GDS 2026.09.0): apoc.import.graphml and the questions vector index both work.
+    image: neo4j:2026.09
     network_mode: "host"
     restart: unless-stopped
     depends_on:
@@ -180,7 +183,7 @@ services:
       start_period: 30s
 
   neo4j-data-import:
-    image: neo4j:5.26
+    image: neo4j:2026.09
     network_mode: "host"
     depends_on:
       neo4j:
