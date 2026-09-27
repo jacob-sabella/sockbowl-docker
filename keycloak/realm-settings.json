@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "displayName": "Sockbowl",
+  "displayNameHtml": "Sockbowl",
+  "sslRequired": "external",
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 36000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "bruteForceProtected": true,
+  "loginTheme": "sockbowl",
+  "registrationAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false
+}

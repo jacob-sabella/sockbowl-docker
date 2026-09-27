@@ -1,0 +1,99 @@
+{
+  "clientId": "sockbowl-game",
+  "name": "Sockbowl Game Client",
+  "description": "Public OIDC client for the Sockbowl SPA (authorization code + PKCE S256; no direct grants)",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": true,
+  "bearerOnly": false,
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "frontchannelLogout": true,
+  "fullScopeAllowed": true,
+  "redirectUris": [
+    "${APP_PROTOCOL}://${APP_HOST}/*",
+    "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}/*",
+    "${APP_PROTOCOL}://${APP_HOST}:4200/*"
+  ],
+  "webOrigins": [
+    "${APP_PROTOCOL}://${APP_HOST}",
+    "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}",
+    "${APP_PROTOCOL}://${APP_HOST}:4200"
+  ],
+  "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "post.logout.redirect.uris": "${APP_PROTOCOL}://${APP_HOST}/*##${APP_PROTOCOL}://${APP_HOST}:4200/*",
+    "access.token.lifespan": "${KC_ACCESS_TOKEN_LIFESPAN}",
+    "client.session.idle.timeout": "3600",
+    "client.session.max.lifespan": "36000"
+  },
+  "protocolMappers": [
+    {
+      "name": "email",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usermodel-property-mapper",
+      "consentRequired": false,
+      "config": {
+        "userinfo.token.claim": "true",
+        "user.attribute": "email",
+        "id.token.claim": "true",
+        "access.token.claim": "true",
+        "claim.name": "email",
+        "jsonType.label": "String"
+      }
+    },
+    {
+      "name": "name",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-full-name-mapper",
+      "consentRequired": false,
+      "config": {
+        "userinfo.token.claim": "true",
+        "id.token.claim": "true",
+        "access.token.claim": "true"
+      }
+    },
+    {
+      "name": "preferred_username",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usermodel-property-mapper",
+      "consentRequired": false,
+      "config": {
+        "userinfo.token.claim": "true",
+        "user.attribute": "username",
+        "id.token.claim": "true",
+        "access.token.claim": "true",
+        "claim.name": "preferred_username",
+        "jsonType.label": "String"
+      }
+    },
+    {
+      "name": "realm roles",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usermodel-realm-role-mapper",
+      "consentRequired": false,
+      "config": {
+        "multivalued": "true",
+        "userinfo.token.claim": "true",
+        "id.token.claim": "true",
+        "access.token.claim": "true",
+        "claim.name": "realm_access.roles",
+        "jsonType.label": "String"
+      }
+    },
+    {
+      "name": "sockbowl-api-audience",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-audience-mapper",
+      "consentRequired": false,
+      "config": {
+        "included.custom.audience": "${SOCKBOWL_AUTH_AUDIENCE}",
+        "access.token.claim": "true",
+        "id.token.claim": "false",
+        "introspection.token.claim": "true"
+      }
+    }
+  ]
+}
