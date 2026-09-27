@@ -25,7 +25,8 @@
 #     service token).
 #
 # Usage:
-#   SOCKBOWL_GAME_BACKEND_SECRET=<the running stack's value> scripts/smoke-auth.sh
+#   SOCKBOWL_GAME_BACKEND_SECRET=<the running stack's value> \
+#   NEO4J_PASSWORD=<the running stack's value> scripts/smoke-auth.sh
 #
 # Env (all match .env.example / docker-compose.yml so the defaults work
 # against the standard e2e overlay unchanged):
@@ -36,7 +37,11 @@
 #     built-in default here), KEYCLOAK_ISSUER_URI (plan risk #5: a minted
 #     token's `iss` must equal this exactly, or every service's issuer
 #     validation fails; defaults to the same computed URL docker-compose.yml's
-#     KEYCLOAK_ISSUER_URI defaults to).
+#     KEYCLOAK_ISSUER_URI defaults to), NEO4J_HTTP_PORT, NEO4J_USER,
+#     NEO4J_PASSWORD (required, no safe default, same reason as the backend
+#     secret above: needed to seed a throwaway BankTossup/BankBonus fixture
+#     over Neo4j's HTTP query endpoint, since docker-compose.yml wires no
+#     qbreader-dump loader and a fresh stack's bank is otherwise empty).
 #
 # Exit: 0 if every row passed. Prints "PASS:"/"FAIL:"/"SKIP:" lines (this
 # repo's convention; see scripts/test-rbac-reconcile.sh) plus a final table
@@ -54,6 +59,9 @@ WS_PROTOCOL="${WS_PROTOCOL:-ws}"
 KEYCLOAK_PORT="${KEYCLOAK_PORT:-8080}"
 SOCKBOWL_GAME_PORT="${SOCKBOWL_GAME_PORT:-7000}"
 SOCKBOWL_QUESTIONS_PORT="${SOCKBOWL_QUESTIONS_PORT:-7009}"
+NEO4J_HTTP_PORT="${NEO4J_HTTP_PORT:-7474}"
+NEO4J_USER="${NEO4J_USER:-neo4j}"
+: "${NEO4J_PASSWORD:?Set NEO4J_PASSWORD to the running stacks value (needed to seed a BankTossup/BankBonus fixture: docker-compose.yml wires no qbreader-dump loader, so a freshly created stack has an empty bank and import-random has nothing to sample)}"
 DEMO_PASSWORD="${DEMO_PASSWORD:-demo123}"
 : "${SOCKBOWL_GAME_BACKEND_SECRET:?Set SOCKBOWL_GAME_BACKEND_SECRET to the running stacks value (rbac-init rotates it on every load-rbac.sh run; there is no safe default)}"
 
@@ -62,6 +70,39 @@ KC_URL="${APP_PROTOCOL}://${APP_HOST}:${KEYCLOAK_PORT}"
 KEYCLOAK_ISSUER_URI="${KEYCLOAK_ISSUER_URI:-${KC_URL}/realms/${REALM}}"
 GAME_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}"
 QUESTIONS_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}"
+NEO4J_URL="${APP_PROTOCOL}://${APP_HOST}:${NEO4J_HTTP_PORT}"
+
+# Game requires every GameSettings field verbatim (CreateGameRequest is bound
+# via its all-args constructor, so Jackson passes JSON `null` for any omitted
+# primitive, e.g. `bonusesEnabled`, and null-into-boolean is a 400 — confirmed
+# live; a real client, e.g. sockbowl-ng, always sends the full object).
+GAME_BODY_CLASSIC='{"gameSettings":{"gameMode":"QUIZ_BOWL_CLASSIC","bonusesEnabled":false}}'
+GAME_BODY_SINGLE='{"gameSettings":{"gameMode":"SINGLE_PLAYER","bonusesEnabled":false}}'
+
+# BankTossup/BankBonus nodes come from a separate qbreader-dump loader that
+# this compose stack does not run (scripts/init-neo4j.sh only imports the
+# Packet/Tossup/Bonus fixture from base.graphml); a fresh stack's bank is
+# empty, so import-random has nothing to sample. Seed the same minimal
+# fixture shape sockbowl-questions' own EphemeralPacketFlowIT uses, over
+# Neo4j's HTTP query endpoint (no cypher-shell/container-name dependency),
+# and remove it again in cleanup().
+BANK_TAG="smoke-$$"
+seed_bank_fixture() {
+  local stmt
+  stmt="UNWIND range(1,5) AS i CREATE (:BankTossup {remoteId: '${BANK_TAG}-t'+i, question: 'Tossup '+i+'?', answer: 'Answer '+i, category: 'Science', subcategory: 'Science', difficulty: 5, year: 2020, standard: true}) CREATE (b:BankBonus {remoteId: '${BANK_TAG}-b'+i, preamble: 'Bonus preamble '+i, category: 'Science', subcategory: 'Science', difficulty: 5, year: 2020, standard: true}) CREATE (b)-[:HAS_PART {order:0}]->(:BankBonusPart {question:'Part1?',answer:'PartA1'}) CREATE (b)-[:HAS_PART {order:1}]->(:BankBonusPart {question:'Part2?',answer:'PartA2'}) CREATE (b)-[:HAS_PART {order:2}]->(:BankBonusPart {question:'Part3?',answer:'PartA3'})"
+  curl -sS -u "${NEO4J_USER}:${NEO4J_PASSWORD}" -X POST "$NEO4J_URL/db/neo4j/tx/commit" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg s "$stmt" '{statements:[{statement:$s}]}')" >/dev/null
+}
+cleanup_bank_fixture() {
+  local stmt
+  stmt="MATCH (n) WHERE (n:BankTossup OR n:BankBonus) AND n.remoteId STARTS WITH '${BANK_TAG}-' OPTIONAL MATCH (n)-[:HAS_PART]->(bp:BankBonusPart) DETACH DELETE n, bp"
+  curl -sS -u "${NEO4J_USER}:${NEO4J_PASSWORD}" -X POST "$NEO4J_URL/db/neo4j/tx/commit" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg s "$stmt" '{statements:[{statement:$s}]}')" >/dev/null || true
+}
+trap cleanup_bank_fixture EXIT
+seed_bank_fixture
 WS_URL="${WS_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}/sockbowl-game"
 
 PASSED=0
@@ -163,11 +204,11 @@ echo
 echo "== REST matrix: game (plan section 4.1) =="
 
 # --- create-new-game-session ---
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "" '{"gameSettings":{"gameMode":"QUIZ_BOWL_CLASSIC"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "" "$GAME_BODY_CLASSIC"
 expect_status "create-new-game-session: guest is allowed (D1)" 200 "$CODE"
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "not-a-jwt" '{"gameSettings":{"gameMode":"QUIZ_BOWL_CLASSIC"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "not-a-jwt" "$GAME_BODY_CLASSIC"
 expect_status "create-new-game-session: invalid bearer -> 401" 401 "$CODE"
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_SERVICE" '{"gameSettings":{"gameMode":"QUIZ_BOWL_CLASSIC"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_SERVICE" "$GAME_BODY_CLASSIC"
 expect_status "create-new-game-session: service token can't host -> 403" 403 "$CODE"
 
 # --- join-game-session-by-code ---
@@ -307,7 +348,7 @@ echo
 echo "== Seats for the STOMP probe (game REST) =="
 
 # A guest game + a guest-joined seat.
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "" '{"gameSettings":{"gameMode":"QUIZ_BOWL_CLASSIC"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "" "$GAME_BODY_CLASSIC"
 GUEST_GAME_ID="$(jq -r '.id' <<<"$BODY")"
 GUEST_JOIN_CODE="$(jq -r '.joinCode' <<<"$BODY")"
 req POST "$GAME_URL/api/v1/session/join-game-session-by-code" "" "$(jq -n --arg c "$GUEST_JOIN_CODE" '{joinCode:$c,name:"SmokeGuest"}')"
@@ -315,13 +356,13 @@ GUEST_PLAYER_ID="$(jq -r '.playerSessionId' <<<"$BODY")"
 GUEST_SECRET="$(jq -r '.playerSecret' <<<"$BODY")"
 
 # A second, unrelated guest game (the cross-game SUBSCRIBE target).
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "" '{"gameSettings":{"gameMode":"QUIZ_BOWL_CLASSIC"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "" "$GAME_BODY_CLASSIC"
 OTHER_GAME_ID="$(jq -r '.id' <<<"$BODY")"
 
 # testuser's own proctorless (SINGLE_PLAYER) game: game owner == testuser, so
 # WP-G4's SetMatchPacket check allows testuser to set it, and the DRAFT packet
 # above is testuser's own — no need to publish it first.
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_AUTHOR" '{"gameSettings":{"gameMode":"SINGLE_PLAYER"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_AUTHOR" "$GAME_BODY_SINGLE"
 AUTH_GAME_ID="$(jq -r '.id' <<<"$BODY")"
 AUTH_JOIN_CODE="$(jq -r '.joinCode' <<<"$BODY")"
 req POST "$GAME_URL/api/v1/session/join-game-session-authenticated" "$TOKEN_AUTHOR" "$(jq -n --arg c "$AUTH_JOIN_CODE" '{joinCode:$c}')"
@@ -329,7 +370,7 @@ AUTH_PLAYER_ID="$(jq -r '.playerSessionId' <<<"$BODY")"
 
 # player3's own proctorless game, joined *before* the ban below (STOMP CONNECT
 # re-checks the ban fresh, regardless of when the seat was created).
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_BAN_TARGET" '{"gameSettings":{"gameMode":"SINGLE_PLAYER"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_BAN_TARGET" "$GAME_BODY_SINGLE"
 BAN_GAME_ID="$(jq -r '.id' <<<"$BODY")"
 BAN_JOIN_CODE="$(jq -r '.joinCode' <<<"$BODY")"
 req POST "$GAME_URL/api/v1/session/join-game-session-authenticated" "$TOKEN_BAN_TARGET" "$(jq -n --arg c "$BAN_JOIN_CODE" '{joinCode:$c}')"
@@ -354,7 +395,7 @@ req POST "$GAME_URL/api/v1/admin/bans" "$TOKEN_MODERATOR" \
 expect_status "POST /api/v1/admin/bans: moderator bans player3 -> 201" 201 "$CODE"
 BAN_ID="$(jq -r '.id // empty' <<<"$BODY")"
 
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_BAN_TARGET" '{"gameSettings":{"gameMode":"SINGLE_PLAYER"}}'
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_BAN_TARGET" "$GAME_BODY_SINGLE"
 expect_status "create-new-game-session: a banned user -> 403" 403 "$CODE"
 req POST "$GAME_URL/api/v1/session/join-game-session-by-code" "$TOKEN_BAN_TARGET" '{"joinCode":"AAAAAA"}'
 expect_status "join-game-session-by-code: a banned user -> 403 (checked before the join code)" 403 "$CODE"
@@ -365,7 +406,7 @@ echo
 echo "== STOMP matrix (game): delegating to scripts/stomp-probe.mjs =="
 
 STOMP_CONFIG="$(mktemp)"
-trap 'rm -f "$STOMP_CONFIG"' EXIT
+trap 'rm -f "$STOMP_CONFIG"; cleanup_bank_fixture' EXIT
 jq -n \
   --arg wsUrl "$WS_URL" \
   --arg guestGame "$GUEST_GAME_ID" --arg guestPlayer "$GUEST_PLAYER_ID" --arg guestSecret "$GUEST_SECRET" \
