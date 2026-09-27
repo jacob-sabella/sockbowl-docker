@@ -1,0 +1,84 @@
+# Throwaway Keycloak stack for scripts/test-rbac-reconcile.sh (and the
+# rbac-reconcile CI workflow). Bridge networking with no published ports, so
+# it can run next to a host-networked sockbowl stack. The test drives
+# everything from the "tools" container, which has the same alpine base and
+# packages as the rbac-init service in docker-compose.yml.
+name: ${RBAC_TEST_PROJECT:-sbm2-rbac}
+
+services:
+  postgres:
+    image: ${RBAC_TEST_POSTGRES_IMAGE:-postgres:18}
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: rbac-test-db-secret
+      POSTGRES_DB: keycloak
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  tools:
+    image: ${RBAC_TEST_ALPINE_IMAGE:-alpine:3.24.2}
+    # Renders the realm import the same way init-keycloak-realm.sh does, then
+    # idles so the test can `docker compose exec` the loader and verifier.
+    command:
+      - /bin/sh
+      - -c
+      - >-
+        apk add --no-cache bash curl jq gettext >/dev/null &&
+        envsubst '$${KEYCLOAK_USER_USERNAME} $${KEYCLOAK_USER_EMAIL} $${KEYCLOAK_USER_FIRSTNAME} $${KEYCLOAK_USER_LASTNAME} $${KEYCLOAK_USER_PASSWORD}'
+        < /keycloak/realm-export.template.json > /import/realm-export.json &&
+        touch /tmp/ready && exec sleep infinity
+    environment:
+      KEYCLOAK_USER_USERNAME: admin
+      KEYCLOAK_USER_EMAIL: admin@sockbowl.test
+      KEYCLOAK_USER_FIRSTNAME: Admin
+      KEYCLOAK_USER_LASTNAME: User
+      KEYCLOAK_USER_PASSWORD: rbac-test-realm-admin-secret
+    volumes:
+      - ../keycloak:/keycloak:ro
+      - ./:/scripts:ro
+      - kc_import:/import
+      # The rbac-init layout from docker-compose.yml: everything flat at /,
+      # client templates at /keycloak-clients.
+      - ./load-rbac.sh:/load-rbac.sh:ro
+      - ./check-secrets.sh:/check-secrets.sh:ro
+      - ../keycloak/rbac-model.json:/rbac-model.json:ro
+      - ../keycloak/realm-settings.json:/realm-settings.json:ro
+      - ../keycloak/clients:/keycloak-clients:ro
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+
+  keycloak:
+    image: ${RBAC_TEST_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.7.4}
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: rbac-test-kc-admin-secret
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: rbac-test-db-secret
+      KC_HTTP_PORT: "8080"
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - kc_import:/opt/keycloak/data/import:ro
+      - ../keycloak/themes/sockbowl:/opt/keycloak/themes/sockbowl:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tools:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+volumes:
+  kc_import:
