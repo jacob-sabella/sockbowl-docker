@@ -144,10 +144,12 @@ services:
   redis:
     # Redis Open Source 8 bundles Search/JSON (and Bloom/TimeSeries) as built-in
     # capabilities, replacing the separate redis-stack-server image; no manual
-    # --loadmodule flags are needed. Verified against a throwaway container
-    # (docker run redis:8.2): FT._LIST, JSON.SET/GET and FT.CREATE ... ON JSON
-    # all work, so Redis OM Spring 2.x's repositories keep working unchanged.
-    image: redis:8.2
+    # --loadmodule flags are needed. 8.10.2 is the newest 8.x tag on Docker Hub
+    # (ahead of 8.8.3/8.6.7/8.2.10). Verified against a throwaway container
+    # (docker run redis:8.10.2): FT._LIST, JSON.SET/GET and FT.CREATE ... ON JSON
+    # all work, and sockbowl-game's Redis OM Spring 2.x repositories start up and
+    # index against it unchanged (see a throwaway -p sbm1x full-profile run).
+    image: redis:8.10.2
     network_mode: "host"
     restart: unless-stopped
     volumes:
