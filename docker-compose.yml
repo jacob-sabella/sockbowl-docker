@@ -221,13 +221,23 @@ services:
       # Client-credentials secret for the sockbowl-game-backend service account,
       # used to authenticate game's server-to-server packet fetch to questions.
       SOCKBOWL_GAME_BACKEND_SECRET: "${SOCKBOWL_GAME_BACKEND_SECRET}"
+    volumes:
+      # See scripts/healthcheck/README.md: this image has no shell/curl, so the
+      # healthcheck below execs the bundled JRE directly against this class.
+      - ./scripts/healthcheck:/health:ro
+    healthcheck:
+      test: ["CMD", "/layers/paketo-buildpacks_bellsoft-liberica/jre/bin/java", "-cp", "/health", "HealthCheck", "http://localhost:${SOCKBOWL_GAME_PORT}/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
     depends_on:
       kafka:
         condition: service_healthy
       redis:
         condition: service_healthy
       sockbowl-questions:
-        condition: service_started
+        condition: service_healthy
       keycloak:
         condition: service_started
       rbac-init:
@@ -256,6 +266,16 @@ services:
       # when AUTH_ENABLED=true — silently disabling all @PreAuthorize checks.
       SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-false}"
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
+    volumes:
+      # See scripts/healthcheck/README.md: this image has no shell/curl, so the
+      # healthcheck below execs the bundled JRE directly against this class.
+      - ./scripts/healthcheck:/health:ro
+    healthcheck:
+      test: ["CMD", "/layers/paketo-buildpacks_bellsoft-liberica/jre/bin/java", "-cp", "/health", "HealthCheck", "http://localhost:${SOCKBOWL_QUESTIONS_PORT}/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
     depends_on:
       neo4j:
         condition: service_healthy
@@ -278,6 +298,17 @@ services:
       - SOCKBOWL_QUESTIONS_PORT=${SOCKBOWL_QUESTIONS_PORT}
       - KEYCLOAK_PORT=${KEYCLOAK_PORT}
       - AUTH_ENABLED=${AUTH_ENABLED:-false}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      sockbowl-game:
+        condition: service_healthy
+      sockbowl-questions:
+        condition: service_healthy
 
   watchtower:
     image: containrrr/watchtower:1.7.1
