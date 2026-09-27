@@ -1,7 +1,6 @@
 services:
   kafka:
     image: apache/kafka:4.3.1
-    container_name: kafka
     network_mode: "host"
     restart: unless-stopped
     environment:
@@ -39,7 +38,6 @@ services:
     # start (even against a brand-new empty volume) if you mount straight onto the old
     # /var/lib/postgresql/data path — mount the volume at /var/lib/postgresql instead.
     image: postgres:18
-    container_name: postgres
     network_mode: "host"
     restart: unless-stopped
     environment:
@@ -58,7 +56,6 @@ services:
 
   keycloak-realm-init:
     image: alpine:3.24.2
-    container_name: keycloak-realm-init
     network_mode: "host"
     environment:
       - APP_HOST=${APP_HOST}
@@ -79,7 +76,6 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.4
-    container_name: keycloak
     network_mode: "host"
     restart: unless-stopped
     environment:
@@ -118,7 +114,6 @@ services:
 
   rbac-init:
     image: alpine:3.24.2
-    container_name: rbac-init
     network_mode: "host"
     environment:
       - KEYCLOAK_URL=http://${APP_HOST}:${KEYCLOAK_PORT}
@@ -138,7 +133,6 @@ services:
 
   neo4j-plugin-init:
     image: curlimages/curl:8.22.0
-    container_name: neo4j-plugin-init
     network_mode: "host"
     user: "root"
     volumes:
@@ -151,7 +145,6 @@ services:
     # redis-stack-server bundles RediSearch + RedisJSON (required by Redis OM Spring 2.x)
     # and auto-loads them, so no manual --loadmodule flags are needed.
     image: redis/redis-stack-server:7.4.0-v8
-    container_name: redis
     network_mode: "host"
     restart: unless-stopped
     volumes:
@@ -165,7 +158,6 @@ services:
 
   neo4j:
     image: neo4j:5.26
-    container_name: neo4j
     network_mode: "host"
     restart: unless-stopped
     depends_on:
@@ -186,7 +178,6 @@ services:
 
   neo4j-data-import:
     image: neo4j:5.26
-    container_name: neo4j-data-import
     network_mode: "host"
     depends_on:
       neo4j:
@@ -203,12 +194,16 @@ services:
 
   sockbowl-game:
     image: ${SOCKBOWL_GAME_IMAGE:-ghcr.io/jacob-sabella/sockbowl-game:main}
-    container_name: sockbowl-game
     # App services are gated behind the "full" profile so a bare `docker compose up`
     # starts infra only (run game/questions/ng from source for local dev).
     profiles: ["full"]
     network_mode: "host"
     restart: unless-stopped
+    labels:
+      # container_name is gone (throwaway `-p` projects need to coexist), so
+      # watchtower can no longer target this container by a fixed name; it now
+      # watches by this label instead (WATCHTOWER_LABEL_ENABLE=true below).
+      - com.centurylinklabs.watchtower.enable=true
     environment:
       SOCKBOWL_DATABASE: 0
       SOCKBOWL_KAFKA_BOOTSTRAP_SERVERS: "${APP_HOST}:${KAFKA_PORT}"
@@ -251,10 +246,11 @@ services:
 
   sockbowl-questions:
     image: ${SOCKBOWL_QUESTIONS_IMAGE:-ghcr.io/jacob-sabella/sockbowl-questions:main}
-    container_name: sockbowl-questions
     profiles: ["full"]
     network_mode: "host"
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     environment:
       SOCKBOWL_NEO4J_USER: "${NEO4J_USER}"
       SOCKBOWL_NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
@@ -292,10 +288,11 @@ services:
 
   sockbowl-ng:
     image: ${SOCKBOWL_NG_IMAGE:-ghcr.io/jacob-sabella/sockbowl-ng:main}
-    container_name: sockbowl-ng
     profiles: ["full"]
     network_mode: "host"
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     environment:
       - APP_HOST=${APP_HOST}
       - APP_PROTOCOL=${APP_PROTOCOL}
@@ -318,7 +315,6 @@ services:
 
   watchtower:
     image: containrrr/watchtower:1.7.1
-    container_name: watchtower
     profiles: ["full"]
     volumes:
       # Rootful Docker (most hosts) uses /var/run/docker.sock; rootless Docker
@@ -331,7 +327,9 @@ services:
       - WATCHTOWER_INCLUDE_STOPPED=false
       - WATCHTOWER_DEBUG=true
       - DOCKER_API_VERSION=1.44
-    command: sockbowl-game sockbowl-questions sockbowl-ng
+      # Container names are no longer fixed (container_name was removed so throwaway
+      # `-p` projects can coexist), so watch by label instead of by name.
+      - WATCHTOWER_LABEL_ENABLE=true
     restart: unless-stopped
 
 volumes:
