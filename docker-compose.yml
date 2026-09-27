@@ -211,7 +211,13 @@ services:
       # container_name is gone (throwaway `-p` projects need to coexist), so
       # watchtower can no longer target this container by a fixed name; it now
       # watches by this label instead (WATCHTOWER_LABEL_ENABLE=true below).
+      #
+      # com.centurylinklabs.watchtower.scope pairs with each project's own
+      # watchtower's WATCHTOWER_SCOPE (set to ${COMPOSE_PROJECT_NAME} below),
+      # so one host running several `-p` projects doesn't have every
+      # project's watchtower update every other project's labelled containers.
       - com.centurylinklabs.watchtower.enable=true
+      - com.centurylinklabs.watchtower.scope=${COMPOSE_PROJECT_NAME}
     environment:
       SOCKBOWL_DATABASE: 0
       SOCKBOWL_KAFKA_BOOTSTRAP_SERVERS: "${APP_HOST}:${KAFKA_PORT}"
@@ -259,6 +265,7 @@ services:
     restart: unless-stopped
     labels:
       - com.centurylinklabs.watchtower.enable=true
+      - com.centurylinklabs.watchtower.scope=${COMPOSE_PROJECT_NAME}
     environment:
       SOCKBOWL_NEO4J_USER: "${NEO4J_USER}"
       SOCKBOWL_NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
@@ -301,6 +308,7 @@ services:
     restart: unless-stopped
     labels:
       - com.centurylinklabs.watchtower.enable=true
+      - com.centurylinklabs.watchtower.scope=${COMPOSE_PROJECT_NAME}
     environment:
       - APP_HOST=${APP_HOST}
       - APP_PROTOCOL=${APP_PROTOCOL}
@@ -322,6 +330,11 @@ services:
         condition: service_healthy
 
   watchtower:
+    # containrrr/watchtower is archived upstream (no more releases/security fixes).
+    # nickfedor/watchtower (https://github.com/nicholas-fedor/watchtower) is the
+    # actively maintained fork and a drop-in replacement; not switched yet since
+    # it hasn't been smoke-tested against this compose file, but it's the first
+    # thing to try if this image falls behind.
     image: containrrr/watchtower:1.7.1
     profiles: ["full"]
     volumes:
@@ -338,6 +351,12 @@ services:
       # Container names are no longer fixed (container_name was removed so throwaway
       # `-p` projects can coexist), so watch by label instead of by name.
       - WATCHTOWER_LABEL_ENABLE=true
+      # Scope this watchtower to only its own project's labelled containers.
+      # Without this, every project's watchtower on a host running several
+      # `-p` projects at once (e.g. throwaway sbm1x* trials alongside the
+      # baseline stack) would watch and update every other project's
+      # containers too, since WATCHTOWER_LABEL_ENABLE alone isn't project-scoped.
+      - WATCHTOWER_SCOPE=${COMPOSE_PROJECT_NAME}
     restart: unless-stopped
 
 volumes:
