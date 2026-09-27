@@ -112,6 +112,17 @@ docker compose logs -f [service_name]
   regular user. The realm admin user (`KEYCLOAK_USER_*`, default `admin / admin123`)
   also has the `admin` role.
 
+### Watchtower / Docker socket
+
+Watchtower (part of the `full` profile) needs the host's Docker socket bind-mounted in
+to watch and auto-update the app containers. The default, `DOCKER_SOCKET_PATH=/var/run/docker.sock`,
+matches **rootful** Docker (Docker Desktop, and most Linux installs where the daemon
+runs as root). If your host runs **rootless** Docker instead, the socket lives under
+your user's runtime dir — set this in `.env`:
+```bash
+DOCKER_SOCKET_PATH=${XDG_RUNTIME_DIR}/docker.sock
+```
+
 ### Upgrading Postgres data
 
 Postgres is now `postgres:18` and **cannot read a data directory initialized by an

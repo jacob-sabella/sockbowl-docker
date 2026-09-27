@@ -284,7 +284,10 @@ services:
     container_name: watchtower
     profiles: ["full"]
     volumes:
-      - ${XDG_RUNTIME_DIR}/docker.sock:/var/run/docker.sock
+      # Rootful Docker (most hosts) uses /var/run/docker.sock; rootless Docker
+      # uses ${XDG_RUNTIME_DIR}/docker.sock. Override DOCKER_SOCKET_PATH in .env
+      # for a rootless host — see README's "Watchtower / Docker socket" section.
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock
     environment:
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_POLL_INTERVAL=30
