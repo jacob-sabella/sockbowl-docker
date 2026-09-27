@@ -45,9 +45,15 @@ There are two distinct kinds of authorization; only the first is RBAC/Keycloak:
 | Role | Bundles |
 |---|---|
 | `player` | `packet:read`, `game:host` |
-| `author` | `player` + `packet:create`, `packet:update`, `question:generate`, `taxonomy:manage` |
-| `moderator` | `player` + `user:ban` |
+| `author` | `player` + `packet:create`, `packet:update`, `question:generate` |
+| `moderator` | `player` + `user:ban`, `taxonomy:manage` |
 | `admin` | `author` + `moderator` + `packet:delete` + `admin:access` |
+
+M3 D4 moves `taxonomy:manage` from `author` to `moderator`: taxonomy (category /
+subcategory / difficulty) creation, rename and merge is a moderation action,
+not an authoring one. Authors keep `packet:create`/`packet:update` and pick
+from existing taxonomy entries; `admin` still has `taxonomy:manage` through
+`moderator`.
 
 New realm users default to `player` (Keycloak realm default-role).
 
