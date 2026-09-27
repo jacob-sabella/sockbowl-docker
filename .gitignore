@@ -56,3 +56,7 @@ pids
 *.pid
 *.seed
 *.pid.lock
+
+# scripts/stomp-probe.mjs runtime deps (scripts/package.json); reinstalled by
+# scripts/smoke-auth.sh, not committed.
+scripts/node_modules/
