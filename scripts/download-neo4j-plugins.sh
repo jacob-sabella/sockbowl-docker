@@ -7,8 +7,8 @@ mkdir -p /plugins
 
 # APOC must match the Neo4j MAJOR.MINOR line (neo4j:5.26 -> apoc 5.26.x).
 # The 2025.x APOC CalVer stream is for Neo4j 2025.x and fails 5.26's version check.
-curl -Lf -o /plugins/apoc-5.26.28-core.jar \
-  https://github.com/neo4j/apoc/releases/download/5.26.28/apoc-5.26.28-core.jar
+curl -Lf -o /plugins/apoc-5.26.31-core.jar \
+  https://github.com/neo4j/apoc/releases/download/5.26.31/apoc-5.26.31-core.jar
 
 # GDS 2.23.0 has compatibility issues with this Neo4j line.
 # Commenting out until a compatible version is released
