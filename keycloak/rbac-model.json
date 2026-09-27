@@ -2,7 +2,7 @@
   "permissionRoles": [
     "packet:read", "packet:create", "packet:update", "packet:delete",
     "question:generate", "taxonomy:manage", "game:host", "user:ban", "admin:access",
-    "packet:manage-any"
+    "packet:manage-any", "packet:read-answers"
   ],
   "compositeRoles": {
     "player":    ["packet:read", "game:host"],
@@ -12,10 +12,19 @@
     "user":      ["player"]
   },
   "defaultRole": "player",
-  "serviceClient": { "clientId": "sockbowl-game-backend", "roles": ["packet:read"] },
-  "demoUserRoles": {
-    "testuser": "author",
-    "moderator": "moderator",
-    "player1": "admin"
-  }
+  "audience": "sockbowl-api",
+  "realmSettings": "realm-settings.json",
+  "serviceClient": { "clientId": "sockbowl-game-backend", "roles": ["packet:read", "packet:read-answers"] },
+  "clients": [
+    { "clientId": "sockbowl-game", "file": "clients/sockbowl-game.json" },
+    { "clientId": "sockbowl-game-backend", "file": "clients/sockbowl-game-backend.json", "secretEnv": "SOCKBOWL_GAME_BACKEND_SECRET" },
+    { "clientId": "sockbowl-e2e", "file": "clients/sockbowl-e2e.json", "enabledWhen": "SOCKBOWL_E2E" }
+  ],
+  "demoUsers": [
+    { "username": "player1",   "tier": "admin",     "email": "player1@sockbowl.com",   "firstName": "Player", "lastName": "One" },
+    { "username": "player2",   "tier": "player",    "email": "player2@sockbowl.com",   "firstName": "Player", "lastName": "Two" },
+    { "username": "player3",   "tier": "player",    "email": "player3@sockbowl.com",   "firstName": "Player", "lastName": "Three" },
+    { "username": "testuser",  "tier": "author",    "email": "testuser@sockbowl.com",  "firstName": "Test",   "lastName": "User" },
+    { "username": "moderator", "tier": "moderator", "email": "moderator@sockbowl.com", "firstName": "Mod",    "lastName": "Erator" }
+  ]
 }

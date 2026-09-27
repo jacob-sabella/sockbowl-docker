@@ -1,0 +1,45 @@
+{
+  "clientId": "sockbowl-game-backend",
+  "name": "Sockbowl Game Backend",
+  "description": "Confidential service-account client the sockbowl-game backend uses to call sockbowl-questions (client credentials only)",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": false,
+  "bearerOnly": false,
+  "clientAuthenticatorType": "client-secret",
+  "standardFlowEnabled": false,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": true,
+  "fullScopeAllowed": true,
+  "redirectUris": [],
+  "webOrigins": [],
+  "protocolMappers": [
+    {
+      "name": "realm roles",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usermodel-realm-role-mapper",
+      "consentRequired": false,
+      "config": {
+        "multivalued": "true",
+        "userinfo.token.claim": "true",
+        "id.token.claim": "true",
+        "access.token.claim": "true",
+        "claim.name": "realm_access.roles",
+        "jsonType.label": "String"
+      }
+    },
+    {
+      "name": "sockbowl-api-audience",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-audience-mapper",
+      "consentRequired": false,
+      "config": {
+        "included.custom.audience": "${SOCKBOWL_AUTH_AUDIENCE}",
+        "access.token.claim": "true",
+        "id.token.claim": "false",
+        "introspection.token.claim": "true"
+      }
+    }
+  ]
+}

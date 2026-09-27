@@ -4,7 +4,7 @@
   "displayName": "Sockbowl",
   "displayNameHtml": "Sockbowl",
   "loginTheme": "sockbowl",
-  "sslRequired": "none",
+  "sslRequired": "external",
   "ssoSessionIdleTimeout": 3600,
   "ssoSessionMaxLifespan": 36000,
   "registrationAllowed": true,
@@ -13,93 +13,6 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-  "clients": [
-    {
-      "clientId": "sockbowl-game",
-      "name": "Sockbowl Game Client",
-      "description": "OAuth2/OIDC client for Sockbowl game application",
-      "enabled": true,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "",
-      "publicClient": true,
-      "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
-      "serviceAccountsEnabled": false,
-      "protocol": "openid-connect",
-      "fullScopeAllowed": true,
-      "redirectUris": [
-        "${APP_PROTOCOL}://${APP_HOST}/*",
-        "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}/*",
-        "${APP_PROTOCOL}://${APP_HOST}:4200/*"
-      ],
-      "webOrigins": [
-        "${APP_PROTOCOL}://${APP_HOST}",
-        "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}",
-        "${APP_PROTOCOL}://${APP_HOST}:4200"
-      ],
-      "attributes": {
-        "access.token.lifespan": "1800",
-        "client.session.idle.timeout": "3600",
-        "client.session.max.lifespan": "36000"
-      },
-      "protocolMappers": [
-        {
-          "name": "email",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-property-mapper",
-          "consentRequired": false,
-          "config": {
-            "userinfo.token.claim": "true",
-            "user.attribute": "email",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "claim.name": "email",
-            "jsonType.label": "String"
-          }
-        },
-        {
-          "name": "name",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-full-name-mapper",
-          "consentRequired": false,
-          "config": {
-            "userinfo.token.claim": "true",
-            "id.token.claim": "true",
-            "access.token.claim": "true"
-          }
-        },
-        {
-          "name": "preferred_username",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-property-mapper",
-          "consentRequired": false,
-          "config": {
-            "userinfo.token.claim": "true",
-            "user.attribute": "username",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "claim.name": "preferred_username",
-            "jsonType.label": "String"
-          }
-        },
-        {
-          "name": "realm roles",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-realm-role-mapper",
-          "consentRequired": false,
-          "config": {
-            "multivalued": "true",
-            "userinfo.token.claim": "true",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "claim.name": "realm_access.roles",
-            "jsonType.label": "String"
-          }
-        }
-      ]
-    }
-  ],
   "users": [
     {
       "username": "${KEYCLOAK_USER_USERNAME}",
@@ -108,7 +21,10 @@
       "firstName": "${KEYCLOAK_USER_FIRSTNAME}",
       "lastName": "${KEYCLOAK_USER_LASTNAME}",
       "emailVerified": true,
-      "realmRoles": ["admin", "user"],
+      "realmRoles": [
+        "admin",
+        "user"
+      ],
       "credentials": [
         {
           "type": "password",
@@ -130,8 +46,6 @@
       }
     ]
   },
-  "defaultRoles": ["user"],
-  "scopeMappings": [],
-  "clientScopeMappings": {},
-  "components": {}
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0
 }
