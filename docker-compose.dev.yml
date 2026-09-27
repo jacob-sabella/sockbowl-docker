@@ -13,6 +13,18 @@
 #
 # Never use this overlay for a real deployment: ALLOW_INSECURE_DEFAULTS=true
 # disables the placeholder-secret refusal in scripts/check-secrets.sh.
+#
+# M4 (rate limiting / quotas, plans/m4-limits.md §2.10 "Dev/e2e overlay
+# values"): every Playwright worker and the bot harness share one IP, and M2's
+# and M3's e2e suites (plus normal local dev) must not get throttled by M4's
+# production-sized limits. This overlay therefore relaxes the *rate* policies
+# game and questions actually key by IP or by one shared local user, and
+# raises the guest/player/author hosted-sessions *quotas* enough that no
+# suite trips them. It deliberately leaves `session-create`'s rate at a
+# moderate value rather than raising it as high as the others (kept in case
+# a future spec test wants to observe it); M4's own Playwright specs use tiny
+# limits from docker-compose.limits-e2e.yml, layered on top of this file, not
+# by lowering anything here.
 services:
   keycloak:
     command: start-dev --import-realm
@@ -30,3 +42,20 @@ services:
       - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
       - SOCKBOWL_E2E=true
       - KC_ACCESS_TOKEN_LIFESPAN=${KC_ACCESS_TOKEN_LIFESPAN:-300}
+
+  sockbowl-game:
+    environment:
+      SOCKBOWL_RL_DEFAULT_CAPACITY: "10000"
+      SOCKBOWL_RL_SESSION_CREATE_CAPACITY: "1000"
+      SOCKBOWL_RL_SESSION_JOIN_CAPACITY: "1000"
+      SOCKBOWL_RL_WS_CONNECT_CAPACITY: "1000"
+      SOCKBOWL_RL_STOMP_SEND_IP_CAPACITY: "10000"
+      SOCKBOWL_QUOTA_GUEST_HOSTED_SESSIONS: "100"
+      SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS: "100"
+      SOCKBOWL_QUOTA_AUTHOR_HOSTED_SESSIONS: "100"
+
+  sockbowl-questions:
+    environment:
+      SOCKBOWL_RL_DEFAULT_CAPACITY: "10000"
+      SOCKBOWL_RL_GRAPHQL_WRITE_CAPACITY: "1000"
+      SOCKBOWL_RL_GRAPHQL_READ_CAPACITY: "5000"

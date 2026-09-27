@@ -273,6 +273,36 @@ services:
       # Client-credentials secret for the sockbowl-game-backend service account,
       # used to authenticate game's server-to-server packet fetch to questions.
       SOCKBOWL_GAME_BACKEND_SECRET: "${SOCKBOWL_GAME_BACKEND_SECRET}"
+      # M4 rate limiting / quotas. Every key below is a bare passthrough (no
+      # value here): left unset in .env, it is genuinely absent from the
+      # container's environment (docker compose resolves an unset bare key to
+      # null and drops it), so the app's own built-in default in
+      # application.properties applies untouched. Set it in .env or an overlay
+      # (docker-compose.dev.yml, docker-compose.limits-e2e.yml) to override —
+      # see README.md "Limits and quotas". (Deliberately not
+      # `${VAR:-}`-substituted: that form always injects the variable, even as
+      # an empty string when unset, which breaks Spring's numeric/duration
+      # property binding instead of falling through to its default.)
+      SOCKBOWL_RATELIMIT_ENABLED:
+      SOCKBOWL_QUOTA_ENABLED:
+      SOCKBOWL_FORWARD_HEADERS_STRATEGY:
+      SOCKBOWL_TRUSTED_PROXIES_REGEX:
+      SOCKBOWL_RL_SERVICE_CLIENTS:
+      SOCKBOWL_RL_DEFAULT_CAPACITY:
+      SOCKBOWL_RL_DEFAULT_REFILL_PERIOD:
+      SOCKBOWL_RL_SESSION_CREATE_CAPACITY:
+      SOCKBOWL_RL_SESSION_CREATE_REFILL_PERIOD:
+      SOCKBOWL_RL_SESSION_JOIN_CAPACITY:
+      SOCKBOWL_RL_SESSION_JOIN_REFILL_PERIOD:
+      SOCKBOWL_RL_WS_CONNECT_CAPACITY:
+      SOCKBOWL_RL_WS_CONNECT_REFILL_PERIOD:
+      SOCKBOWL_RL_STOMP_SEND_IP_CAPACITY:
+      SOCKBOWL_RL_STOMP_SEND_IP_REFILL_PERIOD:
+      SOCKBOWL_RL_STOMP_BUZZ_CAPACITY:
+      SOCKBOWL_RL_STOMP_BUZZ_REFILL_PERIOD:
+      SOCKBOWL_QUOTA_GUEST_HOSTED_SESSIONS:
+      SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS:
+      SOCKBOWL_QUOTA_AUTHOR_HOSTED_SESSIONS:
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
       # healthcheck below execs the bundled JRE directly against this class.
@@ -308,6 +338,16 @@ services:
       SOCKBOWL_NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
       SOCKBOWL_NEO4J_URL: "bolt://${APP_HOST}:${NEO4J_PORT}"
       SOCKBOWL_PORT: "${SOCKBOWL_QUESTIONS_PORT}"
+      # M4: questions shares game's Redis (same host/port/DB index) for rate
+      # limiting, quotas and the ban mirror. Hardcoded to match sockbowl-game's
+      # SOCKBOWL_REDIS_HOST/PORT/SOCKBOWL_DATABASE above exactly, rather than
+      # exposed as independently overridable env vars, because the two
+      # services' limiter/ban keys collide by design (shared `rl:`/`usage:`/
+      # `ban:` prefixes) and must land in the same Redis DB — see
+      # plans/m4-limits.md §2.1's key schema and its "must equal game's DB" note.
+      SOCKBOWL_REDIS_HOST: "${APP_HOST}"
+      SOCKBOWL_REDIS_PORT: "${REDIS_PORT}"
+      SOCKBOWL_DATABASE: 0
       SOCKBOWL_AI_PROVIDER: "${SOCKBOWL_AI_PROVIDER}"
       SOCKBOWL_AI_LOCAL_MODEL: "${SOCKBOWL_AI_LOCAL_MODEL}"
       SPRING_AI_OPENAI_CHAT_ENABLED: "${SPRING_AI_OPENAI_CHAT_ENABLED}"
@@ -324,6 +364,25 @@ services:
       SOCKBOWL_AUTH_AUDIENCE: "${SOCKBOWL_AUTH_AUDIENCE:-sockbowl-api}"
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
       KEYCLOAK_JWK_SET_URI: "${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs"
+      # M4 rate limiting / quotas. See the matching comment on sockbowl-game
+      # above: every key below is a bare, unset-by-default passthrough.
+      SOCKBOWL_RATELIMIT_ENABLED:
+      SOCKBOWL_QUOTA_ENABLED:
+      SOCKBOWL_FORWARD_HEADERS_STRATEGY:
+      SOCKBOWL_TRUSTED_PROXIES_REGEX:
+      SOCKBOWL_RL_SERVICE_CLIENTS:
+      SOCKBOWL_RL_DEFAULT_CAPACITY:
+      SOCKBOWL_RL_DEFAULT_REFILL_PERIOD:
+      SOCKBOWL_RL_GRAPHQL_READ_CAPACITY:
+      SOCKBOWL_RL_GRAPHQL_READ_REFILL_PERIOD:
+      SOCKBOWL_RL_GRAPHQL_WRITE_CAPACITY:
+      SOCKBOWL_RL_GRAPHQL_WRITE_REFILL_PERIOD:
+      SOCKBOWL_RL_AI_GENERATE_CAPACITY:
+      SOCKBOWL_RL_AI_GENERATE_REFILL_PERIOD:
+      SOCKBOWL_RL_IMPORT_CAPACITY:
+      SOCKBOWL_RL_IMPORT_REFILL_PERIOD:
+      SOCKBOWL_AI_SERVER_DAILY_BUDGET:
+      SOCKBOWL_AI_SERVER_ALLOWED_MODELS:
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
       # healthcheck below execs the bundled JRE directly against this class.
@@ -341,6 +400,8 @@ services:
         condition: service_completed_successfully
       rbac-init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   sockbowl-ng:
     image: ${SOCKBOWL_NG_IMAGE:-ghcr.io/jacob-sabella/sockbowl-ng:main}
