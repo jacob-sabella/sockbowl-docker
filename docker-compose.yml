@@ -196,7 +196,7 @@ services:
     restart: "no"
 
   sockbowl-game:
-    image: ghcr.io/jacob-sabella/sockbowl-game:main
+    image: ${SOCKBOWL_GAME_IMAGE:-ghcr.io/jacob-sabella/sockbowl-game:main}
     container_name: sockbowl-game
     # App services are gated behind the "full" profile so a bare `docker compose up`
     # starts infra only (run game/questions/ng from source for local dev).
@@ -234,7 +234,7 @@ services:
         condition: service_completed_successfully
 
   sockbowl-questions:
-    image: ghcr.io/jacob-sabella/sockbowl-questions:main
+    image: ${SOCKBOWL_QUESTIONS_IMAGE:-ghcr.io/jacob-sabella/sockbowl-questions:main}
     container_name: sockbowl-questions
     profiles: ["full"]
     network_mode: "host"
@@ -265,7 +265,7 @@ services:
         condition: service_completed_successfully
 
   sockbowl-ng:
-    image: ghcr.io/jacob-sabella/sockbowl-ng:main
+    image: ${SOCKBOWL_NG_IMAGE:-ghcr.io/jacob-sabella/sockbowl-ng:main}
     container_name: sockbowl-ng
     profiles: ["full"]
     network_mode: "host"

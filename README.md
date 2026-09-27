@@ -86,10 +86,12 @@ docker compose up -d          # kafka, postgres, keycloak, neo4j, redis (+ init 
 docker compose --profile full up -d
 ```
 
-> The app images are `ghcr.io/jacob-sabella/sockbowl-*:main`, built and pushed by CI.
-> To run the *full* stack against local code changes, build the images first
-> (`./gradlew bootBuildImage` in game/questions, `docker build` in ng) or use the
-> infra-only workflow above and start the apps from their dev servers.
+> The app images default to `ghcr.io/jacob-sabella/sockbowl-*:main`, built and pushed by
+> CI. To run the *full* stack against local code changes, either build the images first
+> (`./gradlew bootBuildImage` in game/questions, `docker build` in ng) and point
+> `SOCKBOWL_GAME_IMAGE` / `SOCKBOWL_QUESTIONS_IMAGE` / `SOCKBOWL_NG_IMAGE` in `.env` at
+> your local tags, or use the infra-only workflow above and start the apps from their
+> dev servers.
 
 Stop services:
 ```bash
