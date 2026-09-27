@@ -55,3 +55,55 @@ else
     "CALL apoc.import.graphml('https://sockbowl-data.s3.us-east-2.amazonaws.com/base.graphml', {batchSize: 10000, useTypes: true, storeNodeIds: true, readLabels: true})"
   echo "✅ GraphML import completed!"
 fi
+
+# Seed the local question bank (:BankTossup / :BankBonus) so questions'
+# import-random/generate endpoints and ng's Generate-tab e2e specs have
+# something to sample on a fresh stack. base.graphml above only ships
+# :Packet/:Tossup/:Bonus nodes (already-built packets), not the separate
+# qbreader-dump bank the Generate tab samples from, so a stack that only
+# imports the GraphML still has an empty bank (M3 follow-up from M1;
+# see PROGRESS.md). Idempotent: skipped if any :BankTossup already exists.
+echo "✅ Checking for existing BankTossup nodes..."
+BANK_COUNT=$(cypher-shell -a "${NEO4J_URL}" -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" --format plain \
+  "MATCH (n:BankTossup) RETURN count(n)" | tail -1)
+
+if [ "$BANK_COUNT" -gt 0 ]; then
+  echo "🟡 BankTossup nodes already exist ($BANK_COUNT found). Skipping bank seed."
+else
+  echo "🟢 Seeding the question bank across the standard categories..."
+  cypher-shell -a "${NEO4J_URL}" -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" --format plain << 'CYPHER'
+WITH ["Literature", "History", "Science", "Fine Arts", "Religion", "Mythology",
+      "Philosophy", "Social Science", "Geography", "Current Events", "Other Academic", "Pop Culture"] AS categories
+UNWIND categories AS category
+UNWIND range(1, 8) AS i
+CREATE (:BankTossup {
+  remoteId: 'seed-' + category + '-t' + i,
+  question: category + ' seed tossup ' + i + '?',
+  answer: category + ' seed answer ' + i,
+  category: category,
+  subcategory: category,
+  difficulty: (i % 5) + 1,
+  year: 2015 + (i % 10),
+  standard: true
+});
+CYPHER
+  cypher-shell -a "${NEO4J_URL}" -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" --format plain << 'CYPHER'
+WITH ["Literature", "History", "Science", "Fine Arts", "Religion", "Mythology",
+      "Philosophy", "Social Science", "Geography", "Current Events", "Other Academic", "Pop Culture"] AS categories
+UNWIND categories AS category
+UNWIND range(1, 4) AS i
+CREATE (b:BankBonus {
+  remoteId: 'seed-' + category + '-b' + i,
+  preamble: category + ' seed bonus preamble ' + i,
+  category: category,
+  subcategory: category,
+  difficulty: (i % 5) + 1,
+  year: 2015 + (i % 10),
+  standard: true
+})
+CREATE (b)-[:HAS_PART {order: 0}]->(:BankBonusPart {question: category + ' seed part one ' + i + '?', answer: category + ' seed part one answer ' + i})
+CREATE (b)-[:HAS_PART {order: 1}]->(:BankBonusPart {question: category + ' seed part two ' + i + '?', answer: category + ' seed part two answer ' + i})
+CREATE (b)-[:HAS_PART {order: 2}]->(:BankBonusPart {question: category + ' seed part three ' + i + '?', answer: category + ' seed part three answer ' + i});
+CYPHER
+  echo "✅ Bank seed completed (96 tossups, 48 bonuses across 12 categories)."
+fi
