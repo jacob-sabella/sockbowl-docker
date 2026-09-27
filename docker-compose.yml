@@ -29,9 +29,10 @@ services:
       start_period: 20s
 
   postgres:
-    # NOTE: Postgres 17 cannot read a PG13 data dir. On upgrade from an older
+    # NOTE: Postgres major upgrades cannot read an older major's data dir (PG17
+    # cannot read PG13, PG18 cannot read PG17, etc). On upgrade from an older
     # stack, remove the old volume first: `docker compose down && docker volume rm sockbowl-docker_postgres_data`
-    image: postgres:17
+    image: postgres:18
     container_name: postgres
     network_mode: "host"
     restart: unless-stopped

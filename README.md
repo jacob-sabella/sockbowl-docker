@@ -114,12 +114,17 @@ docker compose logs -f [service_name]
 
 ### Upgrading Postgres data
 
-Postgres is now `postgres:17` and **cannot read a PG13 data directory**. If you are
-upgrading an existing stack, wipe the old volume first (dev data is recreated on boot):
+Postgres is now `postgres:18` and **cannot read a data directory initialized by an
+older major version** (17, 13, etc). If you are upgrading an existing stack, wipe the
+old volume first (dev data is recreated on boot):
 ```bash
 docker compose down
 docker volume rm sockbowl-docker_postgres_data
 ```
+
+To keep real data across a major version bump instead of wiping it, run `pg_upgrade`
+(or dump/restore via `pg_dump` / `pg_restore`) before switching the image tag — this
+compose file does not automate that migration.
 
 ### Script Usage
 
