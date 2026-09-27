@@ -1,0 +1,33 @@
+# M4 limits e2e overlay (plans/m4-limits.md §2.10 "Dev/e2e overlay values",
+# WP-D1).
+#
+# docker-compose.dev.yml relaxes rate limits and hosted-session quotas so
+# M2's and M3's Playwright suites (and normal local dev) aren't throttled by
+# M4's production-sized defaults. M4's own Playwright specs need the
+# opposite: tiny limits they can trip and watch recover in seconds. Layer
+# this file on top of the dev overlay (never standalone — it inherits
+# everything else from docker-compose.dev.yml, including start-dev Keycloak,
+# demo accounts and the sockbowl-e2e client) for those specs only:
+#
+#   docker compose -p sockbowl-m4e2e \
+#     -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.limits-e2e.yml \
+#     [-f docker-compose.build.yml] --profile full up -d
+#
+# Never layer this over a stack other suites are also using: a session-create
+# capacity of 2 per 20s and a hosted-sessions quota of 2 (guest) / 3 (player)
+# will trip M2's and M3's own Playwright runs. Use a dedicated project name.
+services:
+  sockbowl-game:
+    environment:
+      # session-create: rate-limit.spec.ts's guest trigger-and-recovery case
+      # (create 3 games, the 3rd is throttled, wait 20s, the 4th succeeds).
+      SOCKBOWL_RL_SESSION_CREATE_CAPACITY: "2"
+      SOCKBOWL_RL_SESSION_CREATE_REFILL_PERIOD: "20s"
+      # stomp-buzz: rate-limit.spec.ts's buzz-spam case (a burst of buzzes
+      # gets a RATE_LIMITED StompError; one 1s later is accepted).
+      SOCKBOWL_RL_STOMP_BUZZ_CAPACITY: "3"
+      # Undo the dev overlay's relaxed hosted-sessions quotas: admin-usage.spec.ts
+      # needs the real D10 defaults (guest 2, player 3) so overriding and
+      # clearing a quota is observable.
+      SOCKBOWL_QUOTA_GUEST_HOSTED_SESSIONS: "2"
+      SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS: "3"

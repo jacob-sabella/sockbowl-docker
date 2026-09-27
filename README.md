@@ -147,6 +147,47 @@ these defaults.
 - **Guest mode** (`AUTH_ENABLED=false`) — no Keycloak required, fastest path for quick
   local iteration; explicitly opt into it by setting `AUTH_ENABLED=false` in `.env`.
 
+### Limits and quotas
+
+M4 adds Redis-backed rate limiting, abuse controls and per-role quotas to
+`sockbowl-game` and `sockbowl-questions` (see `plans/m4-limits.md` for the
+full design). `sockbowl-questions` now depends on `redis` (`condition:
+service_healthy`) and shares game's Redis host/port/DB index, so both
+services' limiter, quota and ban keys land together.
+
+Both apps enable rate limiting and quotas by default (`SOCKBOWL_RATELIMIT_ENABLED`
+/ `SOCKBOWL_QUOTA_ENABLED`, both `true` in `.env.example`) with production-sized
+policies (session creation, join-by-code, GraphQL reads/writes, AI generation,
+imports, STOMP CONNECT/SEND/buzz, and per-role hosted-session/AI/import/packet
+quotas). See `.env.example`'s "Rate limiting, quotas and abuse controls"
+section for the individual `SOCKBOWL_RL_*` / `SOCKBOWL_QUOTA_*` overrides —
+each is commented out there, so uncommenting one overrides that single
+policy or quota and leaving it alone keeps the app's built-in default.
+
+Two overlays layer on top of the dev/e2e posture from "Authentication modes"
+above:
+
+- **`docker-compose.dev.yml`** relaxes the rate policies and hosted-session
+  quotas that would otherwise throttle a Playwright worker pool or the bot
+  harness sharing one IP (M2's and M3's e2e suites, and normal local dev).
+  It's already part of the dev/e2e command above — nothing extra to add.
+- **`docker-compose.limits-e2e.yml`** does the opposite for M4's own
+  Playwright specs: tiny `session-create` and `stomp-buzz` limits and the
+  real (small) hosted-session quotas, so a spec can trip a limit and watch it
+  recover within the test's timeout. Layer it on top of the dev overlay, and
+  use its own project name so it doesn't throttle any other suite sharing
+  the host:
+  ```bash
+  docker compose -p sockbowl-m4e2e \
+    -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.limits-e2e.yml \
+    [-f docker-compose.build.yml] --profile full up -d --build
+  ```
+
+`scripts/test-limits-wiring.sh` is a standalone acceptance check for this
+wiring (throwaway project, config validation plus a live Redis/env-injection
+check); see its header comment for what it does and does not require from
+game/questions.
+
 ### Production secrets
 
 Copying `.env.example` as-is and deploying with plain `docker compose --profile full
