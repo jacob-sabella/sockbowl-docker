@@ -41,8 +41,16 @@
 #      for real at that point (see plan §3 D1 "Acceptance").
 #
 # Usage: scripts/test-limits-wiring.sh
-#   LIMITS_WIRING_PROJECT   compose project name (default sockbowl-m4wiring-<pid>)
-#   LIMITS_WIRING_KEEP      true keeps the stack up after the run (default false)
+#   LIMITS_WIRING_PROJECT          compose project name (default sockbowl-m4wiring-<pid>)
+#   LIMITS_WIRING_KEEP             true keeps the stack up after the run (default false)
+#   LIMITS_WIRING_GAME_IMAGE       override SOCKBOWL_GAME_IMAGE (default: .env.example's
+#   LIMITS_WIRING_QUESTIONS_IMAGE  override SOCKBOWL_QUESTIONS_IMAGE   published ghcr.io
+#   LIMITS_WIRING_NG_IMAGE         override SOCKBOWL_NG_IMAGE          :main image)
+#     Use these to point at locally built images (e.g. sockbowl-questions:local, from
+#     docker-compose.build.yml's own `./gradlew bootBuildImage` recipe) when the published
+#     :main image can't start for a reason this WP doesn't own — e.g. the pre-existing
+#     ChatModel-bean-ambiguity crash tracked in PROGRESS.md's M1 baseline-fixes note, fixed
+#     on later goal branches but not in :main, since nothing here is ever pushed to it.
 #
 # Requires docker (compose v2) and jq. Uses network_mode: host like the rest
 # of this compose file, so it cannot run concurrently with another full
@@ -64,6 +72,16 @@ cp .env.example "$ENV_FILE"
 # The dev overlay's ALLOW_INSECURE_DEFAULTS=true lets check-secrets.sh accept
 # .env.example's CHANGE_ME/demo123-style placeholders unchanged; nothing else
 # needs overriding for a wiring-only run.
+
+# Optional image overrides (see the usage comment above). A later line wins
+# in a docker compose --env-file, so appending here overrides .env.example's
+# own SOCKBOWL_*_IMAGE=...:main lines without touching that file.
+{
+  [ -n "${LIMITS_WIRING_GAME_IMAGE:-}" ] && echo "SOCKBOWL_GAME_IMAGE=${LIMITS_WIRING_GAME_IMAGE}"
+  [ -n "${LIMITS_WIRING_QUESTIONS_IMAGE:-}" ] && echo "SOCKBOWL_QUESTIONS_IMAGE=${LIMITS_WIRING_QUESTIONS_IMAGE}"
+  [ -n "${LIMITS_WIRING_NG_IMAGE:-}" ] && echo "SOCKBOWL_NG_IMAGE=${LIMITS_WIRING_NG_IMAGE}"
+  true
+} >>"$ENV_FILE"
 
 set -a
 # shellcheck disable=SC1090
