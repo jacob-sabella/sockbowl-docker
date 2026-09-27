@@ -143,3 +143,143 @@ regular demo user (player). Authoring demo user gets `author`.
 - Multi-instance concurrency (latent; single-instance).
 - Migrating to Keycloak fine-grained Authorization Services (UMA) — realm
   composite roles are sufficient and simpler.
+
+## Revision 2, M2 (2026-09)
+
+Implementation (`plans/m2-auth.md`, waves W1–W4) landed with the following
+refinements to this spec. `keycloak/rbac-model.json` is the source of truth;
+this section reconciles it against Revision 1 above. See `PROGRESS.md`
+decisions D1–D15 for the full record.
+
+- **D1 Guest posture.** Auth is additive, not a guest-mode toggle: guests can
+  still host and join without a token, and a signed-in user hosts/joins with
+  a JWT (bans, ownership and stats then apply to that identity). `game:host`
+  gates authenticated hosting/joining
+  (`join-game-session-authenticated`); guest hosting/joining stays
+  `permitAll` (see the guest endpoint list below).
+- **D2 Packet visibility.** `Packet.visibility` (`DRAFT`/`PUBLISHED`, plus
+  `EPHEMERAL` — D15) drives `PacketReadPolicy`. An anonymous or player reader
+  gets the answer-free `PacketProjection` (`answersRedacted: true`, tossup/
+  bonus answers null) for a `PUBLISHED` packet, and `null` (no existence
+  oracle) for a `DRAFT`/`EPHEMERAL` packet they can't see. Full content
+  (including answers) is available to the owner, `packet:manage-any`
+  holders, and — the mechanism this revision adds — a caller holding
+  **`packet:read-answers`**.
+- **`packet:read-answers` (new permission-role).** Granted *only* to the
+  `sockbowl-game-backend` service account (no human composite holds it): this
+  is how the game's server-to-server packet fetch (AUTH-18) reads full
+  answers for the proctor without any human user ever being granted
+  answer-read as a platform permission. `packet:read` (existence/search,
+  answer-free) and `packet:read-answers` (this) are deliberately separate
+  authorities. For a normal (DRAFT/PUBLISHED) packet, full read is
+  `packet:read-answers` OR `packet:manage-any` OR the recorded owner; for a
+  **game-only (EPHEMERAL, D15) packet** it is `packet:read-answers` *only* —
+  `packet:manage-any` does not apply and there is no owner
+  (`PacketReadPolicy.canReadFull`).
+- **D3 Ownerless packets.** `packet:manage-any` is required to edit a packet
+  with no owner. `import-random` records the caller as owner when they hold
+  `packet:create`; see D15 for the no-`packet:create` case.
+- **Author `packet:delete` (clarifies Revision 1).** Revision 1's composite
+  table only put `packet:delete` on `admin`. Implementation gives it to
+  `author` directly (`rbac-model.json` `compositeRoles.author` includes
+  `packet:delete`) — an author can delete **their own** packets without
+  needing `admin`; `packet:manage-any` (admin-only) is still required to
+  delete an ownerless or someone else's packet. `admin`'s composite still
+  lists `packet:delete` explicitly (redundant with inheriting it via
+  `author`, kept for readability of the model file).
+- **D15 (amends D3).** `POST /api/qbreader/import-random` stays `permitAll`
+  (guests and players keep the existing UX). A caller without
+  `packet:create` (guest or player) gets an ownerless, unlisted `EPHEMERAL`
+  packet, game-only-readable, not editable, deleted after 24h (M4 TTL sweep
+  rate-limits creation per IP). A caller with `packet:create` still gets an
+  owned `DRAFT` as before.
+- **D8 Bans (M2 scope).** Bans are stored app-locally in `sockbowl-game`'s
+  Postgres (`BanService`), gated on `user:ban`
+  (`AdminBanController`/`/api/v1/admin/bans*`). Enforced at REST
+  session-create/join and at STOMP CONNECT (`StompConnectAuthenticator`,
+  `BANNED`). Redis publication for questions to consult, IP/CIDR bans and
+  STOMP-SEND-time (mid-game) enforcement are **not** part of M2 — they remain
+  M4 scope (risk #9, "Ban gaps remain until M4").
+- **D9 Compose posture.** `docker-compose.yml` is production-capable by
+  default (`AUTH_ENABLED`/`CREATE_DEMO_ACCOUNTS`/`SOCKBOWL_E2E` default to
+  `true`/`false`/`false`; Keycloak `start`, strict hostname). A
+  `docker-compose.dev.yml` overlay turns on `CREATE_DEMO_ACCOUNTS`,
+  `SOCKBOWL_E2E` (a direct-grant `sockbowl-e2e` client for tests/CI) and
+  `ALLOW_INSECURE_DEFAULTS` (bypasses `scripts/check-secrets.sh`'s
+  placeholder-secret refusal), and switches Keycloak to `start-dev`. See
+  `scripts/test-compose-posture.sh` for the acceptance tests and
+  `docker-compose.build.yml` for layering locally-built images on top.
+- **The audience.** Every game/questions-bound access token must carry
+  `aud` containing `sockbowl-api` (`SOCKBOWL_AUTH_AUDIENCE`, a Keycloak
+  client-scope mapper reconciled by `scripts/load-rbac.sh`); both services'
+  `JwtDecoderConfig` validates it and rejects a token without it with 401.
+  `scripts/smoke-auth.sh` asserts a minted token's `aud` claim end-to-end;
+  the specific "no audience mapper" 401 case is covered by an in-JVM fixture
+  (questions' `AudienceIT`/`JwtAudienceValidationTest`, a dedicated
+  no-audience Keycloak client), not by the live smoke test, since the real
+  realm has no such client to mint a token from.
+- **The guest endpoint list (`permitAll`, no token required; an invalid
+  bearer, if sent anyway, is still rejected 401).**
+  - game: `POST /api/v1/session/create-new-game-session`,
+    `POST /api/v1/session/join-game-session-by-code`,
+    `GET /api/v1/auth/status`, `GET /actuator/health(/**)`,
+    `/sockbowl-game(/**)` (the WebSocket handshake only — authentication
+    happens at STOMP CONNECT, not here).
+  - questions: `POST /graphql` (open at the URL level; every mutation is
+    `@PreAuthorize`'d and every packet query goes through
+    `PacketReadPolicy`), the bank aggregate reads (`GET /api/qbreader/stats`,
+    `/dimensions`, `/category-counts`, `/taxonomy-counts`,
+    `POST /api/qbreader/count`), `POST /api/qbreader/import-random` (D15),
+    `GET /actuator/health(/**)`.
+- **STOMP error codes.** `StompErrorCode`: `AUTH_REQUIRED`,
+  `INVALID_CREDENTIALS`, `TOKEN_EXPIRED`, `BANNED`, `SESSION_NOT_FOUND`,
+  `PLAYER_NOT_IN_SESSION`, `IDENTITY_MISMATCH`, `FORBIDDEN_DESTINATION`,
+  `INTERNAL`.
+- **The headers/body contract.** A fatal rejection (CONNECT failures; any
+  SEND/SUBSCRIBE violation) is a STOMP `ERROR` frame carrying the native
+  header `x-sockbowl-error: <CODE>` and a JSON body
+  `{"code": "<CODE>", "message": "...", "retryAfterSeconds": <n|null>}`; the
+  server then closes the socket (`SockbowlStompErrorHandler`). A *non-fatal*
+  error (e.g. a mid-game `PLAYER_NOT_IN_SESSION` on a single bad SEND) is
+  instead delivered as the same JSON shape to `/user/queue/errors`
+  (`StompExceptionAdvice`) and the socket stays open. Clients (the ng bot
+  harness, `scripts/stomp-probe.mjs`) read `code` from the JSON body first,
+  falling back to the `x-sockbowl-error`/`message` native headers.
+
+### Verified live (WP-D3)
+
+`scripts/smoke-auth.sh` (REST + GraphQL) and `scripts/stomp-probe.mjs`
+(STOMP, delegated to from within it) exercise every row above against a real
+running stack: locally built `goal/m2-auth` images
+(`sockbowl-game`/`sockbowl-questions`/`sockbowl-ng`) under
+`docker-compose.yml` + `docker-compose.dev.yml --profile full`, a throwaway
+`sbm2-`-prefixed compose project, real generated secrets (no placeholders),
+`ALLOW_INSECURE_DEFAULTS` off the app services (only the dev overlay's
+Keycloak/rbac-init reconciliation uses it). Result: **62 passed, 0 failed, 1
+skipped** (the skip is the no-audience-mapper 401 case, which needs a
+dedicated Keycloak client and is instead covered by an in-JVM fixture — see
+"The audience" above). See
+`docs/superpowers/plans/2026-07-05-rbac-verification.md` for the pasted
+output table.
+
+Two real bugs surfaced only by this live run (neither visible from unit/IT
+tests, which don't go through the compose stack) and were fixed in
+`scripts/smoke-auth.sh` itself, not in application code:
+
+- `CreateGameRequest` binds via its all-args constructor, so a
+  `create-new-game-session` body that omits a primitive field (e.g.
+  `bonusesEnabled`) gets JSON `null` for it and 400s before authorization
+  even runs. The script now sends the full `GameSettings` object, as a real
+  client does.
+- `docker-compose.yml` wires no loader for the qbreader question-bank data
+  (`BankTossup`/`BankBonus` nodes); only `base.graphml`'s
+  `Packet`/`Tossup`/`Bonus` fixture is imported. A stack brought up from
+  scratch therefore has an empty bank and `import-random` 404s for every
+  caller regardless of role — not an authorization gap. The script now
+  seeds a small bank fixture (the same shape as questions'
+  `EphemeralPacketFlowIT`) over Neo4j's HTTP query endpoint before exercising
+  those rows, and removes it on exit. This gap in the compose stack itself
+  (no bank data outside a smoke test's own seeding) is otherwise
+  undocumented; a future WP wiring a real qbreader-dump loader into compose
+  should know `scripts/smoke-auth.sh`'s fixture is a workaround, not that
+  loader.
