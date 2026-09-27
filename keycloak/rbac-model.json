@@ -6,8 +6,8 @@
   ],
   "compositeRoles": {
     "player":    ["packet:read", "game:host"],
-    "author":    ["player", "packet:create", "packet:update", "packet:delete", "question:generate", "taxonomy:manage"],
-    "moderator": ["player", "user:ban"],
+    "author":    ["player", "packet:create", "packet:update", "packet:delete", "question:generate"],
+    "moderator": ["player", "user:ban", "taxonomy:manage"],
     "admin":     ["author", "moderator", "packet:delete", "admin:access", "packet:manage-any"],
     "user":      ["player"]
   },
