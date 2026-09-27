@@ -1,0 +1,110 @@
+name: Full-stack auth smoke
+
+# Boots the *published* full stack (ghcr.io/.../:main images, not a build from
+# source — this repo has no checkout of sockbowl-game/questions/ng to build
+# from) with AUTH_ENABLED=true under the dev/e2e overlay, and runs
+# scripts/smoke-auth.sh (which delegates the STOMP rows to
+# scripts/stomp-probe.mjs): the plan's section 4.1 REST/GraphQL/STOMP
+# authorization matrix, for real, against real Keycloak tokens.
+#
+# Manual only (workflow_dispatch), not on every push/PR: unlike
+# rbac-reconcile.yml's Keycloak+Postgres-only stack, this brings up the whole
+# --profile full stack (network_mode: host: kafka, postgres, redis, neo4j,
+# keycloak, game, questions, ng) plus a local Ollama for questions' embedding
+# model — several minutes end to end, and it only exercises whatever is
+# currently published at :main, not this PR's unpushed changes (see
+# docker-compose.build.yml's header comment for running it against local
+# builds instead, e.g. from an orchestration workflow that has checked out
+# the sibling repos). Run it by hand after pushing images, or wire a
+# `workflow_call` from a cross-repo release workflow once one exists.
+#
+# See PROGRESS.md risk #6 / scripts/test-compose-posture.sh: this stack uses
+# network_mode: host throughout, so it cannot run next to another full stack
+# on the same runner. GitHub-hosted runners are single-job-per-VM, so this is
+# never actually a conflict in CI; it only matters when running this by hand
+# on a shared dev host (serialize with any other full/keycloak+postgres
+# stack there).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke-auth.sh against the published stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Syntax-check the scripts
+        run: |
+          bash -n scripts/smoke-auth.sh
+          node --check scripts/stomp-probe.mjs
+
+      - name: Install stomp-probe.mjs runtime deps
+        run: npm install
+        working-directory: scripts
+
+      - name: Install Ollama and pull the embedding model
+        # questions' Neo4j vector store always embeds via Ollama at startup
+        # (see .env.example), regardless of the chat provider; without this
+        # the vector store init 404s and sockbowl-questions never reports
+        # healthy.
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          sudo systemctl enable --now ollama
+          for i in $(seq 1 30); do curl -fsS http://localhost:11434/ >/dev/null 2>&1 && break; sleep 2; done
+          ollama pull mxbai-embed-large
+
+      - name: Generate real secrets and bring up the full stack
+        env:
+          COMPOSE_PROJECT: sbm2-smoke-ci
+        run: |
+          cp .env.example .env
+          {
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+            echo "NEO4J_PASSWORD=$(openssl rand -hex 24)"
+            echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -hex 24)"
+            echo "KEYCLOAK_USER_PASSWORD=$(openssl rand -hex 24)"
+            echo "SOCKBOWL_GAME_BACKEND_SECRET=$(openssl rand -hex 24)"
+          } >> .env
+          docker compose -p "$COMPOSE_PROJECT" --env-file .env \
+            -f docker-compose.yml -f docker-compose.dev.yml \
+            --profile full up -d
+          echo "SOCKBOWL_GAME_BACKEND_SECRET=$(grep '^SOCKBOWL_GAME_BACKEND_SECRET=' .env | cut -d= -f2-)" >> "$GITHUB_ENV"
+
+      - name: Wait for the stack to become healthy
+        env:
+          COMPOSE_PROJECT: sbm2-smoke-ci
+        run: |
+          compose() { docker compose -p "$COMPOSE_PROJECT" --env-file .env -f docker-compose.yml -f docker-compose.dev.yml "$@"; }
+          for svc in keycloak sockbowl-game sockbowl-questions sockbowl-ng; do
+            health=""
+            for i in $(seq 1 90); do
+              health="$(compose ps -a --format '{{.Health}}' "$svc" 2>/dev/null || true)"
+              echo "state: $svc -> $health"
+              [ "$health" = "healthy" ] && break
+              sleep 10
+            done
+            if [ "$health" != "healthy" ]; then
+              echo "::error::$svc never became healthy"
+              compose logs "$svc" || true
+              exit 1
+            fi
+          done
+
+      - name: Run scripts/smoke-auth.sh
+        run: scripts/smoke-auth.sh
+
+      - name: Tear down (always, including volumes)
+        if: always()
+        env:
+          COMPOSE_PROJECT: sbm2-smoke-ci
+        run: |
+          docker compose -p "$COMPOSE_PROJECT" --env-file .env \
+            -f docker-compose.yml -f docker-compose.dev.yml \
+            --profile full down -v --remove-orphans || true
