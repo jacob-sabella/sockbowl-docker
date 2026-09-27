@@ -34,10 +34,12 @@ cp .env.example .env
   - Username, email, first/last name, and password
   - This user has the `admin` RBAC tier (see "Authentication modes")
 
-- **CREATE_DEMO_ACCOUNTS**: Create demo accounts for testing (default: `true`)
+- **CREATE_DEMO_ACCOUNTS**: Create demo accounts for testing (default: `false` —
+  this file is production-capable by default; use the dev/e2e overlay below
+  instead of flipping this here)
   - When set to `true`, creates 5 demo user accounts (`player1`/`player2`/`player3`/
-    `testuser`/`moderator`, all `demo123`) mapped to the four RBAC tiers — see
-    "Authentication modes" below for the exact role mapping
+    `testuser`/`moderator`, password `DEMO_PASSWORD`) mapped to the four RBAC tiers
+    — see "Authentication modes" below for the exact role mapping
 
 All services will use these centralized values for:
 - Internal service connections (where appropriate)
@@ -70,7 +72,8 @@ The docker-compose stack includes:
 ## Usage
 
 The app services (`sockbowl-game`, `sockbowl-questions`, `sockbowl-ng`, `watchtower`)
-are gated behind the `full` Compose **profile**. This gives two workflows:
+are gated behind the `full` Compose **profile**. This gives two workflows, in two
+postures (see "Authentication modes" below for the posture difference):
 
 **Infra only** (default) — start the backing services and run the app code from source
 (recommended for local development, since the published images may lag your local changes):
@@ -78,22 +81,40 @@ are gated behind the `full` Compose **profile**. This gives two workflows:
 docker compose up -d          # kafka, postgres, keycloak, neo4j, redis (+ init jobs)
 ```
 
-**Full stack** — start everything including the published app images from GHCR:
+**Full stack, production posture** — everything, including the published app images
+from GHCR, with Keycloak in `start` mode, demo accounts off, and no direct-grant client:
 ```bash
 docker compose --profile full up -d
 ```
 
+**Full stack, dev/e2e posture** — layer `docker-compose.dev.yml` on top to get a fast
+Keycloak (`start-dev`), seeded demo logins, and a password-grant `sockbowl-e2e` client
+(so Playwright/CI can fetch tokens without driving the login UI). Use a separate
+Compose **project name** (`-p`) so this can coexist with a production stack on the same
+host:
+```bash
+docker compose -p sockbowl-e2e -f docker-compose.yml -f docker-compose.dev.yml \
+  --profile full up -d
+```
+
 > The app images default to `ghcr.io/jacob-sabella/sockbowl-*:main`, built and pushed by
-> CI. To run the *full* stack against local code changes, either build the images first
-> (`./gradlew bootBuildImage` in game/questions, `docker build` in ng) and point
-> `SOCKBOWL_GAME_IMAGE` / `SOCKBOWL_QUESTIONS_IMAGE` / `SOCKBOWL_NG_IMAGE` in `.env` at
-> your local tags, or use the infra-only workflow above and start the apps from their
-> dev servers.
+> CI. To run either posture above against local code changes instead, either build the
+> images first (`./gradlew bootBuildImage` in game/questions, `docker build` in ng) and
+> point `SOCKBOWL_GAME_IMAGE` / `SOCKBOWL_QUESTIONS_IMAGE` / `SOCKBOWL_NG_IMAGE` in
+> `.env` at your local tags, or layer `docker-compose.build.yml` (see its header
+> comment), e.g.:
+> ```bash
+> docker compose -p sockbowl-e2e -f docker-compose.yml -f docker-compose.dev.yml \
+>   -f docker-compose.build.yml --profile full up -d --build
+> ```
+> or use the infra-only workflow above and start the apps from their dev servers.
 
 Stop services:
 ```bash
-docker compose down                      # infra
-docker compose --profile full down       # everything
+docker compose down                                                  # infra, prod project
+docker compose --profile full down                                   # full stack, prod project
+docker compose -p sockbowl-e2e -f docker-compose.yml \
+  -f docker-compose.dev.yml --profile full down -v                   # full stack, dev/e2e project
 ```
 
 View logs:
@@ -103,20 +124,39 @@ docker compose logs -f [service_name]
 
 ### Authentication modes
 
+`docker-compose.yml` alone is **production-capable by default**: Keycloak runs
+`start` (not `start-dev`) with strict hostname checking against `KEYCLOAK_PUBLIC_URL`,
+demo accounts are off, there's no direct-grant client, and
+`scripts/check-secrets.sh` refuses to boot with placeholder credentials (see
+"Production secrets" below). Local development and Playwright/CI use the
+`docker-compose.dev.yml` overlay from the Usage section above instead of changing
+these defaults.
+
 - **Authenticated mode** (`AUTH_ENABLED=true`, **default** — this is the supported path)
-  — Keycloak-backed login with RBAC (roles, game/packet ownership, ban system). With
-  the shipped defaults (`AUTH_ENABLED=true`, `CREATE_DEMO_ACCOUNTS=true`), `scripts/load-rbac.sh`
-  maps the demo logins (password `demo123`) to all four RBAC tiers:
+  — Keycloak-backed login with RBAC (roles, game/packet ownership, ban system).
+  With the dev/e2e overlay (`CREATE_DEMO_ACCOUNTS=true`, `SOCKBOWL_E2E=true`),
+  `scripts/load-rbac.sh` maps the demo logins (password `DEMO_PASSWORD`, default
+  `demo123`) to all four RBAC tiers:
   - `player1` → **admin** (everything, including the ban-management admin UI)
   - `moderator` → **moderator** (ban/unban users, no admin console)
   - `testuser` → **author** (create/generate questions)
   - `player2` → **player** (host/join games, browse packets)
   - `player3` keeps the realm-default `player` role
 
-  The realm admin user (`KEYCLOAK_USER_*`, default `admin / admin123`) also has the
-  `admin` tier.
+  The realm admin user (`KEYCLOAK_USER_*`) also has the `admin` tier.
 - **Guest mode** (`AUTH_ENABLED=false`) — no Keycloak required, fastest path for quick
   local iteration; explicitly opt into it by setting `AUTH_ENABLED=false` in `.env`.
+
+### Production secrets
+
+Copying `.env.example` as-is and deploying with plain `docker compose --profile full
+up -d` (no `docker-compose.dev.yml`) will not come up: `keycloak-realm-init` and
+`rbac-init` both source `scripts/check-secrets.sh`, which refuses to proceed while
+`POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, `KEYCLOAK_USER_PASSWORD` or
+`SOCKBOWL_GAME_BACKEND_SECRET` still hold one of the shipped `CHANGE_ME_*` /
+well-known-weak placeholder values. Set real values in `.env` before deploying.
+`ALLOW_INSECURE_DEFAULTS=true` bypasses this check; only the dev/e2e overlay sets it,
+and it should never be set in a real deployment's `.env`.
 
 ### Watchtower / Docker socket
 

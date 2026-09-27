@@ -1,0 +1,32 @@
+# Dev / e2e overlay (D9).
+#
+# docker-compose.yml alone is production-capable by default: Keycloak runs
+# `start` with strict hostname checking, demo accounts are off, and there is
+# no direct-grant client. That's wrong for local iteration and for Playwright,
+# which need a fast Keycloak (`start-dev`), seeded demo logins, and a
+# password-grant client (`sockbowl-e2e`) so tests can get tokens without
+# driving the browser through the Keycloak login UI every time.
+#
+# Usage (see README.md "Authentication modes"):
+#   docker compose -p sockbowl-e2e -f docker-compose.yml -f docker-compose.dev.yml \
+#     [-f docker-compose.build.yml] --profile full up -d
+#
+# Never use this overlay for a real deployment: ALLOW_INSECURE_DEFAULTS=true
+# disables the placeholder-secret refusal in scripts/check-secrets.sh.
+services:
+  keycloak:
+    command: start-dev --import-realm
+    environment:
+      - KC_HOSTNAME_STRICT=false
+
+  keycloak-realm-init:
+    environment:
+      - ALLOW_INSECURE_DEFAULTS=true
+
+  rbac-init:
+    environment:
+      - ALLOW_INSECURE_DEFAULTS=true
+      - CREATE_DEMO_ACCOUNTS=true
+      - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
+      - SOCKBOWL_E2E=true
+      - KC_ACCESS_TOKEN_LIFESPAN=${KC_ACCESS_TOKEN_LIFESPAN:-300}
