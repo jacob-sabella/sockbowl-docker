@@ -131,7 +131,7 @@ services:
     restart: "no"
 
   neo4j-plugin-init:
-    image: curlimages/curl:8.21.0
+    image: curlimages/curl:8.22.0
     container_name: neo4j-plugin-init
     network_mode: "host"
     user: "root"
