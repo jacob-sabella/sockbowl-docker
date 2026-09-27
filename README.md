@@ -28,19 +28,17 @@ cp .env.example .env
   - Development: `http` / `ws`
   - Production with HTTPS: `https` / `wss`
 
-- **AUTH_ENABLED**: Enable/disable Keycloak authentication (default: `false`)
+- **AUTH_ENABLED**: Enable/disable Keycloak authentication (default: `true`, the
+  supported path — see "Authentication modes" below for how to run with it `false`)
 
 - **KEYCLOAK_USER_*** variables**: Configure the admin user created in the Keycloak realm
   - Username, email, first/last name, and password
-  - This user will have both `admin` and `user` roles
+  - This user has the `admin` RBAC tier (see "Authentication modes")
 
-- **CREATE_DEMO_ACCOUNTS**: Create demo accounts for testing (default: `false`)
-  - When set to `true`, creates 4 demo user accounts:
-    - `player1` / `demo123`
-    - `player2` / `demo123`
-    - `player3` / `demo123`
-    - `testuser` / `demo123`
-  - All demo accounts have the `user` role
+- **CREATE_DEMO_ACCOUNTS**: Create demo accounts for testing (default: `true`)
+  - When set to `true`, creates 5 demo user accounts (`player1`/`player2`/`player3`/
+    `testuser`/`moderator`, all `demo123`) mapped to the four RBAC tiers — see
+    "Authentication modes" below for the exact role mapping
 
 All services will use these centralized values for:
 - Internal service connections (where appropriate)
@@ -106,13 +104,20 @@ docker compose logs -f [service_name]
 
 ### Authentication modes
 
-- **Guest mode** (`AUTH_ENABLED=false`, default) — no Keycloak required; fastest path.
-- **Authenticated mode** (`AUTH_ENABLED=true`) — Keycloak-backed login with RBAC
-  (roles, game/packet ownership, ban system). For an easy local test, also set
-  `CREATE_DEMO_ACCOUNTS=true` and sign in as **`moderator / demo123`** (has the
-  `admin` role) to exercise the ban-management admin UI, or `player1 / demo123` as a
-  regular user. The realm admin user (`KEYCLOAK_USER_*`, default `admin / admin123`)
-  also has the `admin` role.
+- **Authenticated mode** (`AUTH_ENABLED=true`, **default** — this is the supported path)
+  — Keycloak-backed login with RBAC (roles, game/packet ownership, ban system). With
+  the shipped defaults (`AUTH_ENABLED=true`, `CREATE_DEMO_ACCOUNTS=true`), `scripts/load-rbac.sh`
+  maps the demo logins (password `demo123`) to all four RBAC tiers:
+  - `player1` → **admin** (everything, including the ban-management admin UI)
+  - `moderator` → **moderator** (ban/unban users, no admin console)
+  - `testuser` → **author** (create/generate questions)
+  - `player2` → **player** (host/join games, browse packets)
+  - `player3` keeps the realm-default `player` role
+
+  The realm admin user (`KEYCLOAK_USER_*`, default `admin / admin123`) also has the
+  `admin` tier.
+- **Guest mode** (`AUTH_ENABLED=false`) — no Keycloak required, fastest path for quick
+  local iteration; explicitly opt into it by setting `AUTH_ENABLED=false` in `.env`.
 
 ### Watchtower / Docker socket
 
