@@ -144,6 +144,14 @@ To keep real data across a major version bump instead of wiping it, run `pg_upgr
 (or dump/restore via `pg_dump` / `pg_restore`) before switching the image tag — this
 compose file does not automate that migration.
 
+Separately, the `postgres:18+` image itself changed its expected volume mount point:
+it now keeps data in a major-version-specific subdirectory
+(`/var/lib/postgresql/18/docker`) and expects the volume mounted at
+`/var/lib/postgresql` (not the old `.../postgresql/data`), so that a future
+`pg_upgrade --link` isn't blocked by a mount-point boundary. This compose file already
+mounts it that way; if you're diffing against an older copy, update the mount rather
+than just the image tag.
+
 ### Script Usage
 
 - Run `scripts/download-redis-modules.sh` within a Redis container to copy modules
