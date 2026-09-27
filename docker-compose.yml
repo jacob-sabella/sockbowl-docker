@@ -66,9 +66,17 @@ services:
       - KEYCLOAK_USER_FIRSTNAME=${KEYCLOAK_USER_FIRSTNAME}
       - KEYCLOAK_USER_LASTNAME=${KEYCLOAK_USER_LASTNAME}
       - KEYCLOAK_USER_PASSWORD=${KEYCLOAK_USER_PASSWORD}
-      - CREATE_DEMO_ACCOUNTS=${CREATE_DEMO_ACCOUNTS}
+      # Demo users are no longer created here (scripts/load-rbac.sh /
+      # rbac-init owns CREATE_DEMO_ACCOUNTS now, reconciling `demoUsers` from
+      # keycloak/rbac-model.json).
+      # check-secrets.sh gate (production refuses placeholder secrets):
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - SOCKBOWL_GAME_BACKEND_SECRET=${SOCKBOWL_GAME_BACKEND_SECRET}
+      - ALLOW_INSECURE_DEFAULTS=${ALLOW_INSECURE_DEFAULTS:-false}
     volumes:
       - ./scripts/init-keycloak-realm.sh:/init-keycloak-realm.sh
+      - ./scripts/check-secrets.sh:/check-secrets.sh:ro
       - ./keycloak/realm-export.template.json:/tmp/realm-export.template.json
       - keycloak_import:/opt/keycloak/data/import
     entrypoint: ["/bin/sh", "/init-keycloak-realm.sh"]
@@ -88,10 +96,18 @@ services:
       - KC_DB_URL=jdbc:postgresql://${APP_HOST}:${POSTGRES_PORT}/keycloak
       - KC_DB_USERNAME=${POSTGRES_USER}
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD}
-      - KC_HOSTNAME=${APP_HOST}
+      # Production-capable default: `start` (not `start-dev`), strict hostname
+      # validation against the public URL, and HTTP served behind a
+      # forwarded-headers-aware proxy. docker-compose.dev.yml overrides
+      # `command` to `start-dev` and relaxes KC_HOSTNAME_STRICT for local/e2e
+      # use, where there is no reverse proxy in front of Keycloak.
+      - KC_HOSTNAME=${KEYCLOAK_PUBLIC_URL}
+      - KC_HTTP_ENABLED=true
       - KC_HTTP_PORT=${KEYCLOAK_PORT}
+      - KC_PROXY_HEADERS=xforwarded
+      - KC_HOSTNAME_STRICT=true
       - KC_HEALTH_ENABLED=true
-    command: start-dev --import-realm
+    command: start --import-realm
     volumes:
       - keycloak_import:/opt/keycloak/data/import
       # Sockbowl-branded login theme (referenced by realm loginTheme=sockbowl).
@@ -122,10 +138,28 @@ services:
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
       - SOCKBOWL_GAME_BACKEND_SECRET=${SOCKBOWL_GAME_BACKEND_SECRET}
       - RBAC_MODEL=/rbac-model.json
+      # Client/demo-user reconciliation (section 2.10). CREATE_DEMO_ACCOUNTS
+      # defaults to false (prod); docker-compose.dev.yml turns it on along
+      # with SOCKBOWL_E2E and ALLOW_INSECURE_DEFAULTS.
+      - CREATE_DEMO_ACCOUNTS=${CREATE_DEMO_ACCOUNTS:-false}
+      - DEMO_PASSWORD=${DEMO_PASSWORD:-}
+      - SOCKBOWL_E2E=${SOCKBOWL_E2E:-false}
+      - SOCKBOWL_AUTH_AUDIENCE=${SOCKBOWL_AUTH_AUDIENCE:-sockbowl-api}
+      - KC_ACCESS_TOKEN_LIFESPAN=${KC_ACCESS_TOKEN_LIFESPAN:-300}
+      - ALLOW_INSECURE_DEFAULTS=${ALLOW_INSECURE_DEFAULTS:-false}
+      - APP_HOST=${APP_HOST}
+      - APP_PROTOCOL=${APP_PROTOCOL}
+      - SOCKBOWL_GAME_PORT=${SOCKBOWL_GAME_PORT}
+      # check-secrets.sh gate also needs these two (not otherwise used above).
+      - KEYCLOAK_USER_PASSWORD=${KEYCLOAK_USER_PASSWORD}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     volumes:
       - ./scripts/load-rbac.sh:/load-rbac.sh
+      - ./scripts/check-secrets.sh:/check-secrets.sh:ro
       - ./keycloak/rbac-model.json:/rbac-model.json
-    entrypoint: ["/bin/sh", "-c", "apk add --no-cache bash curl jq >/dev/null && bash /load-rbac.sh"]
+      - ./keycloak/clients:/keycloak-clients:ro
+      - ./keycloak/realm-settings.json:/realm-settings.json:ro
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache bash curl jq gettext >/dev/null && bash /load-rbac.sh"]
     depends_on:
       keycloak:
         condition: service_healthy
@@ -230,9 +264,12 @@ services:
       SOCKBOWL_DB_PASSWORD: "${POSTGRES_PASSWORD}"
       SOCKBOWL_QUESTIONS_URL: "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}/"
       SOCKBOWL_GAME_ALLOWED_ORIGINS: "${SOCKBOWL_GAME_ALLOWED_ORIGINS}"
-      KEYCLOAK_CLIENT_SECRET: "${KEYCLOAK_CLIENT_SECRET}"
-      SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      # Compose is production-capable by default now (D9), so this falls back
+      # to true; AUTH_ENABLED=false stays the supported local-dev opt-out.
+      SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-true}"
+      SOCKBOWL_AUTH_AUDIENCE: "${SOCKBOWL_AUTH_AUDIENCE:-sockbowl-api}"
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
+      KEYCLOAK_JWK_SET_URI: "${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs"
       # Client-credentials secret for the sockbowl-game-backend service account,
       # used to authenticate game's server-to-server packet fetch to questions.
       SOCKBOWL_GAME_BACKEND_SECRET: "${SOCKBOWL_GAME_BACKEND_SECRET}"
@@ -281,8 +318,12 @@ services:
       SOCKBOWL_ALLOWED_ORIGINS: "${SOCKBOWL_QUESTIONS_ALLOWED_ORIGINS}"
       # Without these, questions falls back to NoSecurityConfig (permitAll) even
       # when AUTH_ENABLED=true — silently disabling all @PreAuthorize checks.
-      SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-false}"
+      # Compose is production-capable by default now (D9), so this falls back
+      # to true; AUTH_ENABLED=false stays the supported local-dev opt-out.
+      SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-true}"
+      SOCKBOWL_AUTH_AUDIENCE: "${SOCKBOWL_AUTH_AUDIENCE:-sockbowl-api}"
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
+      KEYCLOAK_JWK_SET_URI: "${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs"
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
       # healthcheck below execs the bundled JRE directly against this class.
@@ -316,7 +357,11 @@ services:
       - SOCKBOWL_GAME_PORT=${SOCKBOWL_GAME_PORT}
       - SOCKBOWL_QUESTIONS_PORT=${SOCKBOWL_QUESTIONS_PORT}
       - KEYCLOAK_PORT=${KEYCLOAK_PORT}
-      - AUTH_ENABLED=${AUTH_ENABLED:-false}
+      # Compose is production-capable by default now (D9), so this falls back
+      # to true; AUTH_ENABLED=false stays the supported local-dev opt-out.
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      # nginx CSP connect-src (WP-N4 renders it from this at container start).
+      - CSP_EXTRA_CONNECT_SRC=${CSP_EXTRA_CONNECT_SRC:-}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/"]
       interval: 10s
