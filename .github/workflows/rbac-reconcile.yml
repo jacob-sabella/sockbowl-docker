@@ -1,0 +1,55 @@
+name: RBAC reconcile
+
+# Boots postgres + Keycloak (tags read from docker-compose.yml) and runs
+# scripts/test-rbac-reconcile.sh: the loader must reconcile a fresh realm and
+# a pre-M2 realm, be a no-op on re-run, remove injected drift, rotate the
+# backend secret, drop sockbowl-e2e / disable demo users when their flags are
+# off, and issue tokens whose aud contains sockbowl-api.
+
+on:
+  push:
+    paths:
+      - "keycloak/**"
+      - "scripts/load-rbac.sh"
+      - "scripts/verify-rbac.sh"
+      - "scripts/check-secrets.sh"
+      - "scripts/test-rbac-reconcile.sh"
+      - "scripts/test-rbac-reconcile.compose.yml"
+      - "docker-compose.yml"
+      - ".github/workflows/rbac-reconcile.yml"
+  pull_request:
+    paths:
+      - "keycloak/**"
+      - "scripts/load-rbac.sh"
+      - "scripts/verify-rbac.sh"
+      - "scripts/check-secrets.sh"
+      - "scripts/test-rbac-reconcile.sh"
+      - "scripts/test-rbac-reconcile.compose.yml"
+      - "docker-compose.yml"
+      - ".github/workflows/rbac-reconcile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reconcile:
+    name: Loader reconcile against Keycloak
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Syntax-check the scripts
+        run: |
+          bash -n scripts/load-rbac.sh scripts/verify-rbac.sh scripts/test-rbac-reconcile.sh
+          sh -n scripts/check-secrets.sh
+          for f in keycloak/rbac-model.json keycloak/realm-settings.json keycloak/realm-export.template.json keycloak/clients/*.json; do
+            jq empty "$f"
+          done
+
+      - name: Reconcile acceptance test
+        env:
+          RBAC_TEST_PROJECT: sbm2-rbac-ci
+        run: scripts/test-rbac-reconcile.sh
