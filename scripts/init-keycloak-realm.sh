@@ -4,6 +4,12 @@ set -e
 # Install required packages
 apk add --no-cache gettext
 
+# Refuse to boot with placeholder/well-known-weak secrets unless the caller
+# explicitly opted in (ALLOW_INSECURE_DEFAULTS=true; docker-compose.dev.yml
+# sets this for local/e2e use). Sourced, not executed, so a failure here
+# exits this script directly.
+. "$(dirname "$0")/check-secrets.sh"
+
 echo "Generating Keycloak realm export from template..."
 
 # Default values if environment variables are not set
@@ -15,121 +21,19 @@ export KEYCLOAK_USER_EMAIL="${KEYCLOAK_USER_EMAIL:-admin@sockbowl.com}"
 export KEYCLOAK_USER_FIRSTNAME="${KEYCLOAK_USER_FIRSTNAME:-Admin}"
 export KEYCLOAK_USER_LASTNAME="${KEYCLOAK_USER_LASTNAME:-User}"
 export KEYCLOAK_USER_PASSWORD="${KEYCLOAK_USER_PASSWORD:-admin123}"
-export CREATE_DEMO_ACCOUNTS="${CREATE_DEMO_ACCOUNTS:-false}"
 
 # Substitute environment variables in the template
 envsubst '${APP_HOST} ${APP_PROTOCOL} ${SOCKBOWL_GAME_PORT} ${KEYCLOAK_USER_USERNAME} ${KEYCLOAK_USER_EMAIL} ${KEYCLOAK_USER_FIRSTNAME} ${KEYCLOAK_USER_LASTNAME} ${KEYCLOAK_USER_PASSWORD}' \
   < /tmp/realm-export.template.json \
   > /opt/keycloak/data/import/realm-export.json
 
-# Add demo accounts if CREATE_DEMO_ACCOUNTS is set to true
-if [ "$CREATE_DEMO_ACCOUNTS" = "true" ]; then
-  echo "Creating demo accounts..."
-
-  # Install jq for JSON manipulation
-  apk add --no-cache jq
-
-  # Define demo users
-  DEMO_USERS='[
-    {
-      "username": "player1",
-      "enabled": true,
-      "email": "player1@sockbowl.com",
-      "firstName": "Player",
-      "lastName": "One",
-      "emailVerified": true,
-      "realmRoles": ["user"],
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo123",
-          "temporary": false
-        }
-      ]
-    },
-    {
-      "username": "player2",
-      "enabled": true,
-      "email": "player2@sockbowl.com",
-      "firstName": "Player",
-      "lastName": "Two",
-      "emailVerified": true,
-      "realmRoles": ["user"],
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo123",
-          "temporary": false
-        }
-      ]
-    },
-    {
-      "username": "player3",
-      "enabled": true,
-      "email": "player3@sockbowl.com",
-      "firstName": "Player",
-      "lastName": "Three",
-      "emailVerified": true,
-      "realmRoles": ["user"],
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo123",
-          "temporary": false
-        }
-      ]
-    },
-    {
-      "username": "testuser",
-      "enabled": true,
-      "email": "testuser@sockbowl.com",
-      "firstName": "Test",
-      "lastName": "User",
-      "emailVerified": true,
-      "realmRoles": ["user"],
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo123",
-          "temporary": false
-        }
-      ]
-    },
-    {
-      "username": "moderator",
-      "enabled": true,
-      "email": "moderator@sockbowl.com",
-      "firstName": "Mod",
-      "lastName": "Erator",
-      "emailVerified": true,
-      "realmRoles": ["user"],
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo123",
-          "temporary": false
-        }
-      ]
-    }
-  ]'
-
-  # Add demo users to the realm export
-  jq --argjson demo_users "$DEMO_USERS" '.users += $demo_users' \
-    /opt/keycloak/data/import/realm-export.json > /tmp/realm-export-with-demo.json
-
-  mv /tmp/realm-export-with-demo.json /opt/keycloak/data/import/realm-export.json
-
-  # RBAC tiers are assigned by scripts/load-rbac.sh (the rbac-init step), which is
-  # the single source of truth for role composition. Demo users are created with
-  # only the base "user" role here; the loader maps them to composite tiers:
-  #   player1 -> admin, testuser -> author, moderator -> moderator, others -> player.
-  echo "Demo accounts created (RBAC tier assigned by rbac-init/load-rbac.sh):"
-  echo "  - player1 / demo123       (-> admin: everything)"
-  echo "  - player2 / demo123       (-> player: host/join, browse packets)"
-  echo "  - player3 / demo123       (-> player)"
-  echo "  - testuser / demo123      (-> author: create/generate questions)"
-  echo "  - moderator / demo123     (-> moderator: ban/unban, no admin console)"
-fi
+# Demo users are no longer created here. scripts/load-rbac.sh (the rbac-init
+# step) is now the single source of truth for them: it reconciles the
+# `demoUsers` list in keycloak/rbac-model.json when CREATE_DEMO_ACCOUNTS=true
+# (creating them, assigning their RBAC tier, and setting DEMO_PASSWORD), and
+# disables any existing demo users otherwise. Splitting "create the user" from
+# "assign its role" across two scripts was the AUTH-06 gap (the old loader
+# only ever added roles and never reconciled anything else).
 
 echo "Keycloak realm export generated successfully!"
 echo "Admin user: ${KEYCLOAK_USER_USERNAME} (${KEYCLOAK_USER_EMAIL})"
