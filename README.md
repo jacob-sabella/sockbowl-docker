@@ -138,7 +138,7 @@ these defaults.
   `scripts/load-rbac.sh` maps the demo logins (password `DEMO_PASSWORD`, default
   `demo123`) to all four RBAC tiers:
   - `player1` → **admin** (everything, including the ban-management admin UI)
-  - `moderator` → **moderator** (ban/unban users, no admin console)
+  - `moderator` → **moderator** (ban/unban users, manage taxonomy: categories/subcategories/difficulties, no admin console)
   - `testuser` → **author** (create/generate questions)
   - `player2` → **player** (host/join games, browse packets)
   - `player3` keeps the realm-default `player` role
