@@ -14,16 +14,25 @@
 # no Dockerfile for Compose's `build:` to point at. Build those two the same
 # way CI does, then tag the result for this overlay to pick up:
 #
-#   (cd ../sockbowl-game && ./gradlew bootBuildImage \
+#   (cd ../sockbowl-game && GITHUB_REPOSITORY=sockbowl/sockbowl-game ./gradlew bootBuildImage \
 #     -I <mavenlocal-init>.gradle -PsockbowlUseMavenLocal=true)
 #   docker tag "$(docker images -q ghcr.io/*/sockbowl-game* | head -1)" sockbowl-game:local
 #
-#   (cd ../sockbowl-questions && ./gradlew bootBuildImage)
+#   (cd ../sockbowl-questions && GITHUB_REPOSITORY=sockbowl/sockbowl-questions ./gradlew bootBuildImage)
 #   docker tag "$(docker images -q ghcr.io/*/sockbowl-questions* | head -1)" sockbowl-questions:local
 #
-# (bootBuildImage's imageName defaults to ghcr.io/${GITHUB_REPOSITORY}:${version};
-# with GITHUB_REPOSITORY unset locally that's ghcr.io/OWNER/REPO:<version> —
-# `docker images` with a glob finds whatever it produced.)
+# bootBuildImage's imageName defaults to ghcr.io/${GITHUB_REPOSITORY}:${version}.
+# GITHUB_REPOSITORY is normally set by GitHub Actions (to the real
+# "owner/repo"); running the same gradlew command by hand, e.g. against
+# these two local worktrees, leaves it unset, and the build.gradle fallback
+# is the literal string "OWNER/REPO". That is not just the *wrong* name for
+# local use, it makes bootBuildImage fail outright: Docker image repository
+# path segments must be lowercase, and "OWNER/REPO" is not (CNB rejects it
+# with an "invalid reference format" error before it gets anywhere near the
+# `docker images` glob above). Set GITHUB_REPOSITORY yourself, as above, to
+# any valid lowercase "owner/repo" — it only has to be well-formed for this
+# local, throwaway tag; it does not need to match the real GHCR path this
+# repo publishes to (see README.md, which uses jacob-sabella/sockbowl-*).
 services:
   sockbowl-game:
     image: sockbowl-game:local

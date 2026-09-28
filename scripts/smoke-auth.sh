@@ -53,6 +53,9 @@ shopt -s inherit_errexit
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# shellcheck source=lib/kafka-consumer-stability.sh
+source "$ROOT/scripts/lib/kafka-consumer-stability.sh"
+
 APP_HOST="${APP_HOST:-localhost}"
 APP_PROTOCOL="${APP_PROTOCOL:-http}"
 WS_PROTOCOL="${WS_PROTOCOL:-ws}"
@@ -169,6 +172,89 @@ jwt_claim() {
   mod=$((${#payload} % 4))
   if [ "$mod" -eq 2 ]; then payload+="=="; elif [ "$mod" -eq 3 ]; then payload+="="; fi
   base64 -d <<<"$payload" 2>/dev/null | jq -r "$filter"
+}
+
+# wait_for_game_kafka_ready — FIX-D1 (M2-LIVE-01).
+#
+# game can report /actuator/health healthy before its Kafka consumer group
+# ("game-consumers") has a stable partition assignment; a STOMP SEND that
+# lands in that window is silently dropped (the default
+# auto.offset.reset=latest skips anything produced before the first
+# assignment), with no error frame — which flakes the STOMP matrix below on a
+# freshly started stack. Call this once, right before that matrix, after the
+# REST/GraphQL rows and the STOMP fixture seats are set up (so it overlaps
+# with, rather than adds to, that setup time).
+#
+# Preferred: FIX-G2 (game, running in parallel with this WP) adds a
+# Kafka-listener readiness HealthIndicator exposed as a
+# `/actuator/health/readiness` group. If the game image under test has it,
+# poll that directly. Older images (or a run before FIX-G2 lands) don't have
+# this endpoint at all (404) — this must not treat that as a failure, so it
+# falls back to asking Kafka itself, via `kafka-consumer-groups.sh
+# --describe`, whether the group has settled on a stable single member
+# across two samples a few seconds apart (kafka_consumer_group_members, from
+# scripts/lib/kafka-consumer-stability.sh). If neither is available (no
+# readiness group and no reachable Kafka container), this only SKIPs the
+# wait rather than failing the whole smoke run over an environment quirk;
+# the STOMP matrix below can still flake in that case, same as before this
+# fix.
+GAME_KAFKA_CONSUMER_GROUP="${GAME_KAFKA_CONSUMER_GROUP:-game-consumers}"
+GAME_READINESS_TIMEOUT_SECONDS="${GAME_READINESS_TIMEOUT_SECONDS:-90}"
+GAME_READINESS_POLL_INTERVAL_SECONDS="${GAME_READINESS_POLL_INTERVAL_SECONDS:-5}"
+
+wait_for_game_kafka_ready() {
+  echo "== waiting for game's Kafka consumer group ('$GAME_KAFKA_CONSUMER_GROUP') to be ready (M2-LIVE-01) =="
+  local deadline=$((SECONDS + GAME_READINESS_TIMEOUT_SECONDS))
+  local readiness_url="$GAME_URL/actuator/health/readiness"
+
+  req GET "$readiness_url" ""
+  if [ "$CODE" = "200" ] || [ "$CODE" = "503" ]; then
+    echo "game exposes $readiness_url (FIX-G2's readiness group); polling it for status=UP"
+    while [ "$SECONDS" -lt "$deadline" ]; do
+      req GET "$readiness_url" ""
+      if [ "$CODE" = "200" ]; then
+        local status
+        status="$(jq -r '.status // empty' <<<"$BODY" 2>/dev/null || true)"
+        if [ "$status" = "UP" ]; then
+          pass "game readiness ($readiness_url) is UP"
+          return 0
+        fi
+      fi
+      sleep "$GAME_READINESS_POLL_INTERVAL_SECONDS"
+    done
+    failc "game readiness ($readiness_url) did not reach status=UP within ${GAME_READINESS_TIMEOUT_SECONDS}s"
+    return 0
+  fi
+
+  echo "game has no $readiness_url (got HTTP $CODE; FIX-G2's readiness group isn't in this image); falling back to polling Kafka's consumer-group state directly"
+  local kafka_cid
+  kafka_cid="$(docker ps --filter 'label=com.docker.compose.service=kafka' --format '{{.ID}}' 2>/dev/null | head -n1 || true)"
+  if [ -z "$kafka_cid" ]; then
+    skip "game Kafka consumer-group readiness wait (no readiness group, and no kafka container found via 'docker ps --filter label=com.docker.compose.service=kafka'); proceeding straight to the STOMP matrix, which may still hit M2-LIVE-01 on a very fresh stack"
+    return 0
+  fi
+
+  local prev="" cur="" stable_polls=0 member_count
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local describe
+    describe="$(docker exec "$kafka_cid" /opt/kafka/bin/kafka-consumer-groups.sh \
+      --bootstrap-server localhost:9092 --describe --group "$GAME_KAFKA_CONSUMER_GROUP" 2>/dev/null || true)"
+    cur="$(kafka_consumer_group_members "$describe")"
+    member_count="$(kafka_consumer_group_member_count "$describe")"
+    if [ "$member_count" -eq 1 ] && [ -n "$prev" ] && [ "$cur" = "$prev" ]; then
+      stable_polls=$((stable_polls + 1))
+      if [ "$stable_polls" -ge 2 ]; then
+        pass "game's Kafka consumer group '$GAME_KAFKA_CONSUMER_GROUP' has a stable single member ($cur)"
+        return 0
+      fi
+    else
+      stable_polls=0
+    fi
+    prev="$cur"
+    sleep "$GAME_READINESS_POLL_INTERVAL_SECONDS"
+  done
+  failc "game's Kafka consumer group '$GAME_KAFKA_CONSUMER_GROUP' never reached a stable single member within ${GAME_READINESS_TIMEOUT_SECONDS}s (last seen: '${cur}')"
+  return 0
 }
 
 echo "== smoke-auth: minting tokens (sockbowl-e2e password grant + sockbowl-game-backend client credentials) =="
@@ -401,6 +487,9 @@ req POST "$GAME_URL/api/v1/session/join-game-session-by-code" "$TOKEN_BAN_TARGET
 expect_status "join-game-session-by-code: a banned user -> 403 (checked before the join code)" 403 "$CODE"
 req POST "$GAME_URL/api/v1/session/join-game-session-authenticated" "$TOKEN_BAN_TARGET" '{"joinCode":"AAAAAA"}'
 expect_status "join-game-session-authenticated: a banned user -> 403" 403 "$CODE"
+
+echo
+wait_for_game_kafka_ready
 
 echo
 echo "== STOMP matrix (game): delegating to scripts/stomp-probe.mjs =="
