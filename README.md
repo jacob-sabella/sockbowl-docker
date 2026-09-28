@@ -182,6 +182,20 @@ above:
     -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.limits-e2e.yml \
     [-f docker-compose.build.yml] --profile full up -d --build
   ```
+- **`docker-compose.e2eauth-relax.yml`** undoes `docker-compose.limits-e2e.yml`
+  for `sockbowl-game` only, so `npm run e2e:auth` (M2's regression suite) can
+  run against the same stack right after `m4:limits` without a full
+  down/up: layer it last, `up -d sockbowl-game` (which recreates only that
+  service — `game`/`questions`/`ng` stay up), and flush any Redis rate-limit
+  buckets `m4:limits` left over before starting `e2e:auth`. Its own header
+  comment has the exact env vars and why each one is set back to the dev
+  overlay's value:
+  ```bash
+  docker compose -p sockbowl-m4e2e \
+    -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.limits-e2e.yml \
+    -f docker-compose.e2eauth-relax.yml [-f docker-compose.build.yml] \
+    --profile full up -d sockbowl-game
+  ```
 
 `scripts/test-limits-wiring.sh` is a standalone acceptance check for this
 wiring (throwaway project, config validation plus a live Redis/env-injection

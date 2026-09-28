@@ -1,0 +1,32 @@
+# WP-E1 r10: e2e:auth (M2's regression suite) must run under ONLY the dev
+# overlay's relaxed limits (plan m4-limits.md §4 "Regression (limits must
+# not break M2)"), never docker-compose.limits-e2e.yml's tiny test-only
+# values -- that overlay's own header comment warns exactly this:
+# "session-create capacity of 2 per 20s and a hosted-sessions quota of 2
+# (guest) / 3 (player) will trip M2's and M3's own Playwright runs."
+#
+# r9's script kept limits-e2e.yml layered in for the whole stack lifetime
+# (compose merge only lets later -f files win, it never removes an earlier
+# file's keys), so e2e:auth silently ran throttled and its guest/player
+# hosting tests (auth-guest-play, auth-rbac-ui's player2 case,
+# m1-login-play, security-headers) failed on exhausted session-create/
+# hosted-session quotas rather than any product bug.
+#
+# This file is layered LAST, after docker-compose.limits-e2e.yml, right
+# before running e2e:auth (via `up -d`, which recreates only
+# sockbowl-game), to put every key limits-e2e.yml touched back to the
+# dev overlay's own values (SOCKBOWL_RL_SESSION_CREATE_CAPACITY/
+# SOCKBOWL_QUOTA_GUEST_HOSTED_SESSIONS/SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS,
+# copied verbatim from docker-compose.dev.yml) or, where dev.yml leaves a key
+# unset (SOCKBOWL_RL_SESSION_CREATE_REFILL_PERIOD, SOCKBOWL_RL_STOMP_BUZZ_CAPACITY),
+# to the application's own documented default (plan §2.2: session-create
+# 5/10m, stomp-buzz 5 burst / 3 per 1s) so the net effect exactly matches
+# "only the dev overlay", never standalone.
+services:
+  sockbowl-game:
+    environment:
+      SOCKBOWL_RL_SESSION_CREATE_CAPACITY: "1000"
+      SOCKBOWL_RL_SESSION_CREATE_REFILL_PERIOD: "10m"
+      SOCKBOWL_RL_STOMP_BUZZ_CAPACITY: "5"
+      SOCKBOWL_QUOTA_GUEST_HOSTED_SESSIONS: "100"
+      SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS: "100"
