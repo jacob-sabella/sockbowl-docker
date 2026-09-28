@@ -170,6 +170,11 @@ check "loader exits non-zero" test "$rc" -ne 0
 check "loader names the placeholder" grep -q 'SOCKBOWL_GAME_BACKEND_SECRET is a placeholder' "$OUT"
 check "nothing was applied" test "$(changes_reported)" -eq 0
 
+section "0b. static model validation (M3/D4 taxonomy:manage move)"
+rbac_model="${ROOT}/keycloak/rbac-model.json"
+check "author composite excludes taxonomy:manage" jqe '(.compositeRoles.author | index("taxonomy:manage")) == null' <"$rbac_model"
+check "moderator composite includes taxonomy:manage" jqe '.compositeRoles.moderator | index("taxonomy:manage")' <"$rbac_model"
+
 section "1. first load, then verify"
 check "loader succeeds" run_loader
 check "loader reported changes" test "$(changes_reported)" -gt 0
@@ -233,6 +238,10 @@ check "player2 lacks packet:create" jqe '(.realm_access.roles | index("packet:cr
 check "player2 lacks packet:read-answers" jqe '(.realm_access.roles | index("packet:read-answers")) == null' <<<"$p2_claims"
 tu_claims="$(password_token sockbowl-e2e testuser | jwt_claims)"
 check "testuser (author) has packet:create" jqe '.realm_access.roles | index("packet:create")' <<<"$tu_claims"
+check "testuser (author) lacks taxonomy:manage" jqe '(.realm_access.roles | index("taxonomy:manage")) == null' <<<"$tu_claims"
+mod_claims="$(password_token sockbowl-e2e moderator | jwt_claims)"
+check "moderator has taxonomy:manage" jqe '.realm_access.roles | index("taxonomy:manage")' <<<"$mod_claims"
+check "moderator has user:ban" jqe '.realm_access.roles | index("user:ban")' <<<"$mod_claims"
 p1_claims="$(password_token sockbowl-e2e player1 | jwt_claims)"
 check "player1 (admin) has packet:manage-any and admin:access" jqe '(.realm_access.roles | index("packet:manage-any")) and (.realm_access.roles | index("admin:access"))' <<<"$p1_claims"
 check "sockbowl-game refuses the password grant (unauthorized_client)" jqe '.error == "unauthorized_client"' < <(password_token sockbowl-game player2)
