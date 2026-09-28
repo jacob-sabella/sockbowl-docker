@@ -13,18 +13,14 @@
   "frontchannelLogout": true,
   "fullScopeAllowed": true,
   "redirectUris": [
-    "${APP_PROTOCOL}://${APP_HOST}/*",
-    "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}/*",
-    "${APP_PROTOCOL}://${APP_HOST}:4200/*"
+    "${SOCKBOWL_PUBLIC_URL}/*"
   ],
   "webOrigins": [
-    "${APP_PROTOCOL}://${APP_HOST}",
-    "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}",
-    "${APP_PROTOCOL}://${APP_HOST}:4200"
+    "${SOCKBOWL_PUBLIC_URL}"
   ],
   "attributes": {
     "pkce.code.challenge.method": "S256",
-    "post.logout.redirect.uris": "${APP_PROTOCOL}://${APP_HOST}/*##${APP_PROTOCOL}://${APP_HOST}:4200/*",
+    "post.logout.redirect.uris": "${SOCKBOWL_PUBLIC_URL}/*",
     "access.token.lifespan": "${KC_ACCESS_TOKEN_LIFESPAN}",
     "client.session.idle.timeout": "3600",
     "client.session.max.lifespan": "36000"

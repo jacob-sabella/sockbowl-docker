@@ -18,8 +18,10 @@
 #                      defaultRole plus the Keycloak built-ins offline_access
 #                      and uma_authorization (client-level composites untouched).
 #   4. Clients         create or update every client in the model's "clients"
-#                      list from its template, reconcile protocol mappers by
-#                      name, set the backend secret from SOCKBOWL_GAME_BACKEND_SECRET
+#                      list from its template, make redirectUris, webOrigins and
+#                      the post-logout redirect URIs exactly the template's set
+#                      (plus SOCKBOWL_EXTRA_REDIRECT_ORIGINS; stale entries are
+#                      removed), reconcile protocol mappers by name, set the backend secret from SOCKBOWL_GAME_BACKEND_SECRET
 #                      (rotation), and make the service account hold exactly
 #                      serviceClient.roles. A client with "enabledWhen": "VAR"
 #                      exists only while VAR=true and is deleted otherwise.
@@ -31,7 +33,7 @@
 #      exits non-zero.
 #
 # Templates (client files and realm settings) may reference
-#   ${APP_PROTOCOL} ${APP_HOST} ${SOCKBOWL_GAME_PORT}
+#   ${SOCKBOWL_PUBLIC_URL} ${APP_PROTOCOL} ${APP_HOST} ${SOCKBOWL_GAME_PORT}
 #   ${SOCKBOWL_AUTH_AUDIENCE} ${KC_ACCESS_TOKEN_LIFESPAN}
 # They are substituted inside JSON string values with jq, so a value can never
 # break the JSON. A leftover ${...} is an error.
@@ -57,6 +59,14 @@
 #   SOCKBOWL_AUTH_AUDIENCE        default: the model's "audience" (sockbowl-api)
 #   KC_ACCESS_TOKEN_LIFESPAN      default 300 (seconds, sockbowl-game and sockbowl-e2e)
 #   APP_PROTOCOL / APP_HOST / SOCKBOWL_GAME_PORT   default http / localhost / 7000
+#   SOCKBOWL_PUBLIC_URL           the browser-facing origin, scheme://host[:port] with
+#                                 no path or trailing slash (default
+#                                 ${APP_PROTOCOL}://${APP_HOST})
+#   SOCKBOWL_EXTRA_REDIRECT_ORIGINS  space-separated extra origins (same format), each
+#                                 added as "<origin>/*" to redirectUris and the
+#                                 post-logout URIs and as "<origin>" to webOrigins of
+#                                 every client whose template has redirect URIs. Dev
+#                                 only (docker-compose.dev.yml); default empty.
 #   ALLOW_INSECURE_DEFAULTS       default false (see check-secrets.sh)
 #   CHECK_SECRETS_SH              default: check-secrets.sh next to this script
 #
@@ -83,8 +93,10 @@ export APP_PROTOCOL="${APP_PROTOCOL:-http}"
 export APP_HOST="${APP_HOST:-localhost}"
 export SOCKBOWL_GAME_PORT="${SOCKBOWL_GAME_PORT:-7000}"
 export KC_ACCESS_TOKEN_LIFESPAN="${KC_ACCESS_TOKEN_LIFESPAN:-300}"
+export SOCKBOWL_PUBLIC_URL="${SOCKBOWL_PUBLIC_URL:-${APP_PROTOCOL}://${APP_HOST}}"
+SOCKBOWL_EXTRA_REDIRECT_ORIGINS="${SOCKBOWL_EXTRA_REDIRECT_ORIGINS:-}"
 
-TEMPLATE_VARS='["APP_PROTOCOL","APP_HOST","SOCKBOWL_GAME_PORT","SOCKBOWL_AUTH_AUDIENCE","KC_ACCESS_TOKEN_LIFESPAN"]'
+TEMPLATE_VARS='["SOCKBOWL_PUBLIC_URL","APP_PROTOCOL","APP_HOST","SOCKBOWL_GAME_PORT","SOCKBOWL_AUTH_AUDIENCE","KC_ACCESS_TOKEN_LIFESPAN"]'
 BUILTIN_DEFAULT_ROLES='["offline_access","uma_authorization"]'
 PERMISSION_ROLE_RE='^[a-z]+:[a-z-]+$'
 
@@ -167,6 +179,60 @@ render_template() {
     fail "unresolved \${...} placeholder in ${file}: $(echo "$rendered" | grep -o '\${[^}]*}' | sort -u | tr '\n' ' ')"
   fi
   echo "$rendered"
+}
+
+# An origin is scheme://host[:port]: no path, query, wildcard or trailing
+# slash. Redirect URIs are security-sensitive, so anything else is refused.
+ORIGIN_RE='^https?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$'
+
+# validate_origins: SOCKBOWL_PUBLIC_URL and every SOCKBOWL_EXTRA_REDIRECT_ORIGINS
+# entry must be a bare origin; sets EXTRA_ORIGINS_JSON (a JSON array).
+validate_origins() {
+  [[ "$SOCKBOWL_PUBLIC_URL" =~ $ORIGIN_RE ]] \
+    || fail "SOCKBOWL_PUBLIC_URL must be scheme://host[:port] with no path or trailing slash (got '${SOCKBOWL_PUBLIC_URL}')"
+  local -a extras=()
+  read -r -a extras <<<"$SOCKBOWL_EXTRA_REDIRECT_ORIGINS" || true
+  local o
+  for o in "${extras[@]}"; do
+    [[ "$o" =~ $ORIGIN_RE ]] \
+      || fail "SOCKBOWL_EXTRA_REDIRECT_ORIGINS entry must be scheme://host[:port] with no path or trailing slash (got '${o}')"
+  done
+  EXTRA_ORIGINS_JSON="$(jq -cn '$ARGS.positional' --args "${extras[@]}")"
+}
+
+# with_extra_origins: reads a rendered client template on stdin and appends
+# the extra origins to redirectUris, webOrigins and post.logout.redirect.uris,
+# but only for clients whose template already has redirect URIs (the browser
+# client; the e2e and backend clients have none and stay empty).
+# shellcheck disable=SC2016 # jq program, not shell
+with_extra_origins() {
+  jq -c --argjson extra "$EXTRA_ORIGINS_JSON" '
+    if ((.redirectUris // []) | length) > 0 and ($extra | length) > 0 then
+      .redirectUris = ((.redirectUris + ($extra | map(. + "/*"))) | unique)
+      | .webOrigins = (((.webOrigins // []) + $extra) | unique)
+      | if ((.attributes // {})["post.logout.redirect.uris"] // "") != "" then
+          .attributes["post.logout.redirect.uris"] =
+            ((.attributes["post.logout.redirect.uris"] | split("##")) + ($extra | map(. + "/*")) | unique | join("##"))
+        else . end
+    else . end'
+}
+
+# The three redirect-shaped client fields are compared as exact SETS
+# (post.logout.redirect.uris is a "##"-joined string): extra entries on the
+# live client are drift, not "fine because the desired ones are present".
+# uri_set_drift DESIRED CURRENT -> JSON array of labels such as
+# "redirectUris-" (live has entries to remove) or "webOrigins+" (to add).
+# shellcheck disable=SC2016 # jq program, not shell
+uri_set_drift() {
+  jq -cn --argjson want "$1" --argjson cur "$2" '
+    def lset: (if type == "array" then . elif type == "string" then (if . == "" then [] else split("##") end) else [] end) | unique;
+    [ {k: "redirectUris", w: $want.redirectUris, c: $cur.redirectUris},
+      {k: "webOrigins", w: $want.webOrigins, c: $cur.webOrigins},
+      {k: "post.logout.redirect.uris", w: ($want.attributes // {})["post.logout.redirect.uris"],
+       c: ($cur.attributes // {})["post.logout.redirect.uris"]} ]
+    | map(select(.w != null) | (.w | lset) as $w | (.c | lset) as $c
+          | (if ($c - $w | length) > 0 then .k + "-" else empty end),
+            (if ($w - $c | length) > 0 then .k + "+" else empty end))'
 }
 
 # jq helper: is the desired value (input) contained in $cur? Objects compare
@@ -376,7 +442,7 @@ reconcile_client() {
     return 0
   fi
 
-  desired="$(render_template "$file")"
+  desired="$(render_template "$file" | with_extra_origins)"
   [ "$(jq -r '.clientId' <<<"$desired")" = "$client_id" ] || fail "${file} does not declare clientId ${client_id}"
   local secret=""
   if [ -n "$secret_env" ]; then
@@ -395,11 +461,17 @@ reconcile_client() {
     uuid="$(find_client_uuid "$client_id")"
     [ -n "$uuid" ] || fail "client ${client_id} not found after creation"
   else
-    local current
+    local current generic uri_drift drift
     current="$(api_get "${REALM_API}/clients/${uuid}")"
-    if ! jq -e --argjson cur "$current" "${JQ_SUBSET}"'subset($cur)' <<<"$settings" >/dev/null; then
-      local drift
-      drift="$(jq -c --argjson cur "$current" "${JQ_SUBSET}"'[to_entries[] | select(.value as $v | .key as $k | ($v | subset($cur[$k])) | not) | .key]' <<<"$settings")"
+    # Everything except the redirect-shaped fields: desired keys must match
+    # (extra live keys are fine). The redirect-shaped fields: exact sets.
+    generic="$(jq -c 'del(.redirectUris, .webOrigins) | if .attributes then .attributes |= del(.["post.logout.redirect.uris"]) else . end' <<<"$settings")"
+    drift="$(jq -c --argjson cur "$current" "${JQ_SUBSET}"'[to_entries[] | select(.value as $v | .key as $k | ($v | subset($cur[$k])) | not) | .key]' <<<"$generic")"
+    uri_drift="$(uri_set_drift "$settings" "$current")"
+    drift="$(jq -cn --argjson a "$drift" --argjson b "$uri_drift" '$a + $b')"
+    if [ "$drift" != "[]" ]; then
+      # `*` merges objects key by key but replaces arrays and strings, so the
+      # PUT carries exactly the desired redirect sets and drops stale entries.
       api PUT "${REALM_API}/clients/${uuid}" "$(jq -c --argjson d "$settings" '(. * $d) | del(.protocolMappers)' <<<"$current")" 204
       change "client updated: ${client_id} ${drift}"
     fi
@@ -488,8 +560,9 @@ main() {
   # shellcheck source-path=SCRIPTDIR source=check-secrets.sh
   . "$CHECK_SECRETS_SH"
   [ -n "$SOCKBOWL_GAME_BACKEND_SECRET" ] || fail "SOCKBOWL_GAME_BACKEND_SECRET is not set"
+  validate_origins
 
-  log "Reconciling realm '${KEYCLOAK_REALM}' at ${KEYCLOAK_URL} with ${RBAC_MODEL} (SOCKBOWL_E2E=${SOCKBOWL_E2E}, CREATE_DEMO_ACCOUNTS=${CREATE_DEMO_ACCOUNTS}, RBAC_PRUNE=${RBAC_PRUNE})"
+  log "Reconciling realm '${KEYCLOAK_REALM}' at ${KEYCLOAK_URL} with ${RBAC_MODEL} (SOCKBOWL_E2E=${SOCKBOWL_E2E}, CREATE_DEMO_ACCOUNTS=${CREATE_DEMO_ACCOUNTS}, RBAC_PRUNE=${RBAC_PRUNE}, public URL ${SOCKBOWL_PUBLIC_URL}, extra origins: ${EXTRA_ORIGINS_JSON})"
   get_admin_token
 
   log "1/5 realm settings";   reconcile_realm_settings

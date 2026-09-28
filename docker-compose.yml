@@ -1,14 +1,34 @@
+# Addresses (M7, plans/m7-deploy.md §3.2): "public" and "internal" are
+# separate variables so the same file serves host-network dev and the bridge-
+# network prod overlay (docker-compose.prod.yml):
+#   SOCKBOWL_PUBLIC_URL      the browser-facing origin (default
+#                            ${APP_PROTOCOL}://${APP_HOST}); drives Keycloak
+#                            client redirect URIs/web origins (rbac-init).
+#   SOCKBOWL_INTERNAL_HOST   where containers reach Kafka, Redis, Postgres and
+#                            Neo4j (default ${APP_HOST}).
+#   KEYCLOAK_INTERNAL_URL    where containers reach Keycloak for the admin API,
+#                            JWKS and client-credentials tokens (default
+#                            http://${APP_HOST}:${KEYCLOAK_PORT}).
+#   KAFKA_ADVERTISED_HOST    what Kafka advertises to clients (default localhost).
+# Every default equals the pre-M7 value, so host-network dev renders the same.
+#
+# Memory (DK-1): every service has `mem_limit: ${SOCKBOWL_<SERVICE>_MEM_LIMIT:-0}`.
+# 0 (the default) means unlimited, which renders as no limit at all, so dev is
+# unchanged. The shared 7.6 GiB prod VPS sets real ceilings; see the "Memory
+# limits (DK-1)" section of .env.example for the numbers and the JVM caps that
+# must go with them.
 services:
   kafka:
     image: apache/kafka:4.3.1
     network_mode: "host"
     restart: unless-stopped
+    mem_limit: ${SOCKBOWL_KAFKA_MEM_LIMIT:-0}
     environment:
       - KAFKA_NODE_ID=1
       - KAFKA_PROCESS_ROLES=broker,controller
       - KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093
       - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${KAFKA_ADVERTISED_HOST:-localhost}:9092
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
@@ -18,6 +38,10 @@ services:
       # 7 days: game-session messages must survive consumer lag / replay.
       # The prior 1h value silently dropped messages on any slowdown.
       - KAFKA_LOG_RETENTION_HOURS=168
+      # DK-1: bare passthrough (absent unless set). The image's default heap is
+      # -Xmx1G, which does not fit a small mem_limit; prod sets e.g.
+      # "-Xms384m -Xmx384m" alongside SOCKBOWL_KAFKA_MEM_LIMIT=640m.
+      - KAFKA_HEAP_OPTS
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -40,6 +64,7 @@ services:
     image: postgres:18
     network_mode: "host"
     restart: unless-stopped
+    mem_limit: ${SOCKBOWL_POSTGRES_MEM_LIMIT:-0}
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -61,6 +86,7 @@ services:
       - APP_HOST=${APP_HOST}
       - APP_PROTOCOL=${APP_PROTOCOL}
       - SOCKBOWL_GAME_PORT=${SOCKBOWL_GAME_PORT}
+      - SOCKBOWL_PUBLIC_URL=${SOCKBOWL_PUBLIC_URL:-${APP_PROTOCOL}://${APP_HOST}}
       - KEYCLOAK_USER_USERNAME=${KEYCLOAK_USER_USERNAME}
       - KEYCLOAK_USER_EMAIL=${KEYCLOAK_USER_EMAIL}
       - KEYCLOAK_USER_FIRSTNAME=${KEYCLOAK_USER_FIRSTNAME}
@@ -86,6 +112,9 @@ services:
     image: quay.io/keycloak/keycloak:26.7.4
     network_mode: "host"
     restart: unless-stopped
+    # DK-1: the image already caps the heap at 70% of the container limit
+    # (-XX:MaxRAMPercentage=70), so a mem_limit alone is enough here.
+    mem_limit: ${SOCKBOWL_KEYCLOAK_MEM_LIMIT:-0}
     environment:
       # KC 26 renamed the bootstrap admin vars; keep legacy ones for back-compat.
       - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN}
@@ -93,7 +122,7 @@ services:
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
       - KC_DB=postgres
-      - KC_DB_URL=jdbc:postgresql://${APP_HOST}:${POSTGRES_PORT}/keycloak
+      - KC_DB_URL=jdbc:postgresql://${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}:${POSTGRES_PORT}/keycloak
       - KC_DB_USERNAME=${POSTGRES_USER}
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD}
       # Production-capable default: `start` (not `start-dev`), strict hostname
@@ -132,7 +161,7 @@ services:
     image: alpine:3.24.2
     network_mode: "host"
     environment:
-      - KEYCLOAK_URL=http://${APP_HOST}:${KEYCLOAK_PORT}
+      - KEYCLOAK_URL=${KEYCLOAK_INTERNAL_URL:-http://${APP_HOST}:${KEYCLOAK_PORT}}
       - KEYCLOAK_REALM=sockbowl
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
@@ -150,6 +179,13 @@ services:
       - APP_HOST=${APP_HOST}
       - APP_PROTOCOL=${APP_PROTOCOL}
       - SOCKBOWL_GAME_PORT=${SOCKBOWL_GAME_PORT}
+      # sockbowl-game's redirectUris/webOrigins/post-logout URIs are exactly
+      # ${SOCKBOWL_PUBLIC_URL}/* plus each space-separated origin in
+      # SOCKBOWL_EXTRA_REDIRECT_ORIGINS (empty here; docker-compose.dev.yml
+      # adds the :4200 and game-port dev origins). load-rbac.sh removes
+      # anything else it finds on the client.
+      - SOCKBOWL_PUBLIC_URL=${SOCKBOWL_PUBLIC_URL:-${APP_PROTOCOL}://${APP_HOST}}
+      - SOCKBOWL_EXTRA_REDIRECT_ORIGINS=${SOCKBOWL_EXTRA_REDIRECT_ORIGINS:-}
       # check-secrets.sh gate also needs these two (not otherwise used above).
       - KEYCLOAK_USER_PASSWORD=${KEYCLOAK_USER_PASSWORD}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -183,11 +219,35 @@ services:
     # (docker run redis:8.10.2): FT._LIST, JSON.SET/GET and FT.CREATE ... ON JSON
     # all work, and sockbowl-game's Redis OM Spring 2.x repositories start up and
     # index against it unchanged (see a throwaway -p sbm1x full-profile run).
+    #
+    # DK-3 (M7): Redis requires a password. scripts/redis-start.sh refuses to
+    # start without SOCKBOWL_REDIS_PASSWORD (or with a CHANGE_ME placeholder,
+    # via check-secrets.sh), writes it into a root-only config file (never onto
+    # the command line), and hands over to the image's own entrypoint, which
+    # still drops privileges and loads the bundled modules. On this host-network
+    # file it binds loopback only (SOCKBOWL_REDIS_BIND), which is the host-
+    # network equivalent of "no published port"; the prod overlay moves Redis
+    # onto its private bridge network with no ports: at all.
+    # REDISCLI_AUTH lets the healthcheck and `docker compose exec redis
+    # redis-cli` authenticate without putting the password in argv.
     image: redis:8.10.2
     network_mode: "host"
     restart: unless-stopped
+    mem_limit: ${SOCKBOWL_REDIS_MEM_LIMIT:-0}
+    environment:
+      - SOCKBOWL_REDIS_PASSWORD=${SOCKBOWL_REDIS_PASSWORD:-}
+      - REDISCLI_AUTH=${SOCKBOWL_REDIS_PASSWORD:-}
+      - SOCKBOWL_REDIS_BIND=${SOCKBOWL_REDIS_BIND:-127.0.0.1 -::1}
+      # DK-1: 0 = no maxmemory (dev). The policy is noeviction on purpose: an
+      # evicting policy could silently drop ban keys or live game sessions;
+      # noeviction makes writes fail instead, which the limiters fail open on (D12).
+      - SOCKBOWL_REDIS_MAXMEMORY=${SOCKBOWL_REDIS_MAXMEMORY:-0}
+      - ALLOW_INSECURE_DEFAULTS=${ALLOW_INSECURE_DEFAULTS:-false}
+    entrypoint: ["/bin/sh", "/redis-start.sh"]
     volumes:
       - redis_data:/data
+      - ./scripts/redis-start.sh:/redis-start.sh:ro
+      - ./scripts/check-secrets.sh:/check-secrets.sh:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -202,11 +262,18 @@ services:
     image: neo4j:2026.09
     network_mode: "host"
     restart: unless-stopped
+    mem_limit: ${SOCKBOWL_NEO4J_MEM_LIMIT:-0}
     depends_on:
       neo4j-plugin-init:
         condition: service_completed_successfully
     environment:
       - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
+      # DK-1: bare passthroughs (absent unless set). Neo4j sizes heap and page
+      # cache from host RAM, not the container limit, so a mem_limit without
+      # these gets OOM-killed; prod sets 512m / 384m under a 1100m limit.
+      - NEO4J_server_memory_heap_initial__size
+      - NEO4J_server_memory_heap_max__size
+      - NEO4J_server_memory_pagecache_size
     volumes:
       - neo4j_data:/data
       - neo4j_plugins:/plugins
@@ -227,7 +294,7 @@ services:
     environment:
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
-      - NEO4J_HOST=${APP_HOST}
+      - NEO4J_HOST=${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}
       - NEO4J_PORT=${NEO4J_PORT}
     volumes:
       - ./scripts/init-neo4j.sh:/init.sh
@@ -241,6 +308,7 @@ services:
     profiles: ["full"]
     network_mode: "host"
     restart: unless-stopped
+    mem_limit: ${SOCKBOWL_GAME_MEM_LIMIT:-0}
     labels:
       # container_name is gone (throwaway `-p` projects need to coexist), so
       # watchtower can no longer target this container by a fixed name; it now
@@ -254,22 +322,29 @@ services:
       - com.centurylinklabs.watchtower.scope=${COMPOSE_PROJECT_NAME}
     environment:
       SOCKBOWL_DATABASE: 0
-      SOCKBOWL_KAFKA_BOOTSTRAP_SERVERS: "${APP_HOST}:${KAFKA_PORT}"
+      SOCKBOWL_KAFKA_BOOTSTRAP_SERVERS: "${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}:${KAFKA_PORT}"
       SOCKBOWL_KAFKA_GAME_TOPIC: "${SOCKBOWL_KAFKA_GAME_TOPIC}"
       SOCKBOWL_PORT: "${SOCKBOWL_GAME_PORT}"
-      SOCKBOWL_REDIS_HOST: "${APP_HOST}"
+      SOCKBOWL_REDIS_HOST: "${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}"
       SOCKBOWL_REDIS_PORT: "${REDIS_PORT}"
-      SOCKBOWL_DB_URL: "jdbc:postgresql://${APP_HOST}:${POSTGRES_PORT}/sockbowl_users"
+      # DK-3: the same password the redis service requires (Redis OM, the
+      # limiter client and the ban mirror all authenticate with it).
+      SOCKBOWL_REDIS_PASSWORD: "${SOCKBOWL_REDIS_PASSWORD:-}"
+      SOCKBOWL_DB_URL: "jdbc:postgresql://${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}:${POSTGRES_PORT}/sockbowl_users"
       SOCKBOWL_DB_USERNAME: "${POSTGRES_USER}"
       SOCKBOWL_DB_PASSWORD: "${POSTGRES_PASSWORD}"
-      SOCKBOWL_QUESTIONS_URL: "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}/"
+      SOCKBOWL_QUESTIONS_URL: "${SOCKBOWL_QUESTIONS_INTERNAL_URL:-${APP_PROTOCOL}://${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}:${SOCKBOWL_QUESTIONS_PORT}/}"
       SOCKBOWL_GAME_ALLOWED_ORIGINS: "${SOCKBOWL_GAME_ALLOWED_ORIGINS}"
       # Compose is production-capable by default now (D9), so this falls back
       # to true; AUTH_ENABLED=false stays the supported local-dev opt-out.
       SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-true}"
       SOCKBOWL_AUTH_AUDIENCE: "${SOCKBOWL_AUTH_AUDIENCE:-sockbowl-api}"
+      # The issuer is always the PUBLIC one (it must equal the tokens' iss),
+      # while JWKS and the client-credentials token endpoint are fetched over
+      # the internal address (M7 §3.5: KC keeps iss public on the back channel).
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
-      KEYCLOAK_JWK_SET_URI: "${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs"
+      KEYCLOAK_JWK_SET_URI: "${KEYCLOAK_INTERNAL_URL:-http://${APP_HOST}:${KEYCLOAK_PORT}}/realms/sockbowl/protocol/openid-connect/certs"
+      KEYCLOAK_TOKEN_URI: "${KEYCLOAK_INTERNAL_URL:-http://${APP_HOST}:${KEYCLOAK_PORT}}/realms/sockbowl/protocol/openid-connect/token"
       # Client-credentials secret for the sockbowl-game-backend service account,
       # used to authenticate game's server-to-server packet fetch to questions.
       SOCKBOWL_GAME_BACKEND_SECRET: "${SOCKBOWL_GAME_BACKEND_SECRET}"
@@ -286,6 +361,10 @@ services:
       SOCKBOWL_RATELIMIT_ENABLED:
       SOCKBOWL_QUOTA_ENABLED:
       SOCKBOWL_FORWARD_HEADERS_STRATEGY:
+      # The trusted-proxy regex (server.tomcat.remoteip.internal-proxies).
+      # SOCKBOWL_INTERNAL_PROXIES is the M7 name; SOCKBOWL_TRUSTED_PROXIES_REGEX
+      # is the M4 name, kept as a fallback. Set only one of them.
+      SOCKBOWL_INTERNAL_PROXIES:
       SOCKBOWL_TRUSTED_PROXIES_REGEX:
       # Which header carries the real client IP once SOCKBOWL_FORWARD_HEADERS_STRATEGY=native
       # is trusted (see .env.example's "Client IP" note, next to
@@ -309,6 +388,13 @@ services:
       SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS:
       SOCKBOWL_QUOTA_AUTHOR_HOSTED_SESSIONS:
       SOCKBOWL_QUOTA_MODERATOR_HOSTED_SESSIONS:
+      # DK-1 JVM caps. The buildpack's memory calculator sizes the heap from
+      # the container limit (mem_limit above) minus thread stacks, metaspace
+      # and code cache; BPL_JVM_THREAD_COUNT (default 250) is the biggest lever
+      # under a small limit. JAVA_TOOL_OPTIONS is per service so a developer's
+      # own shell value never leaks in. All absent/empty unless set.
+      JAVA_TOOL_OPTIONS: "${SOCKBOWL_GAME_JAVA_TOOL_OPTIONS:-}"
+      BPL_JVM_THREAD_COUNT: ${SOCKBOWL_GAME_JVM_THREAD_COUNT:-250}
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
       # healthcheck below execs the bundled JRE directly against this class.
@@ -336,13 +422,14 @@ services:
     profiles: ["full"]
     network_mode: "host"
     restart: unless-stopped
+    mem_limit: ${SOCKBOWL_QUESTIONS_MEM_LIMIT:-0}
     labels:
       - com.centurylinklabs.watchtower.enable=true
       - com.centurylinklabs.watchtower.scope=${COMPOSE_PROJECT_NAME}
     environment:
       SOCKBOWL_NEO4J_USER: "${NEO4J_USER}"
       SOCKBOWL_NEO4J_PASSWORD: "${NEO4J_PASSWORD}"
-      SOCKBOWL_NEO4J_URL: "bolt://${APP_HOST}:${NEO4J_PORT}"
+      SOCKBOWL_NEO4J_URL: "bolt://${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}:${NEO4J_PORT}"
       SOCKBOWL_PORT: "${SOCKBOWL_QUESTIONS_PORT}"
       # M4: questions shares game's Redis (same host/port/DB index) for rate
       # limiting, quotas and the ban mirror. Hardcoded to match sockbowl-game's
@@ -351,9 +438,11 @@ services:
       # services' limiter/ban keys collide by design (shared `rl:`/`usage:`/
       # `ban:` prefixes) and must land in the same Redis DB — see
       # plans/m4-limits.md §2.1's key schema and its "must equal game's DB" note.
-      SOCKBOWL_REDIS_HOST: "${APP_HOST}"
+      SOCKBOWL_REDIS_HOST: "${SOCKBOWL_INTERNAL_HOST:-${APP_HOST}}"
       SOCKBOWL_REDIS_PORT: "${REDIS_PORT}"
       SOCKBOWL_DATABASE: 0
+      # DK-3: the same password as sockbowl-game's (one shared Redis).
+      SOCKBOWL_REDIS_PASSWORD: "${SOCKBOWL_REDIS_PASSWORD:-}"
       SOCKBOWL_AI_PROVIDER: "${SOCKBOWL_AI_PROVIDER}"
       SOCKBOWL_AI_LOCAL_MODEL: "${SOCKBOWL_AI_LOCAL_MODEL}"
       SPRING_AI_OPENAI_CHAT_ENABLED: "${SPRING_AI_OPENAI_CHAT_ENABLED}"
@@ -369,14 +458,16 @@ services:
       SOCKBOWL_AUTH_ENABLED: "${AUTH_ENABLED:-true}"
       SOCKBOWL_AUTH_AUDIENCE: "${SOCKBOWL_AUTH_AUDIENCE:-sockbowl-api}"
       KEYCLOAK_ISSUER_URI: "${KEYCLOAK_ISSUER_URI}"
-      KEYCLOAK_JWK_SET_URI: "${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs"
+      # JWKS over the internal address; see the matching comment on sockbowl-game.
+      KEYCLOAK_JWK_SET_URI: "${KEYCLOAK_INTERNAL_URL:-http://${APP_HOST}:${KEYCLOAK_PORT}}/realms/sockbowl/protocol/openid-connect/certs"
       # M4 rate limiting / quotas. See the matching comment on sockbowl-game
       # above: every key below is a bare, unset-by-default passthrough.
       SOCKBOWL_RATELIMIT_ENABLED:
       SOCKBOWL_QUOTA_ENABLED:
       SOCKBOWL_FORWARD_HEADERS_STRATEGY:
+      # See the matching comments on sockbowl-game above.
+      SOCKBOWL_INTERNAL_PROXIES:
       SOCKBOWL_TRUSTED_PROXIES_REGEX:
-      # See the matching comment on sockbowl-game above.
       SOCKBOWL_REMOTE_IP_HEADER:
       SOCKBOWL_RL_SERVICE_CLIENTS:
       SOCKBOWL_RL_DEFAULT_CAPACITY:
@@ -391,6 +482,9 @@ services:
       SOCKBOWL_RL_IMPORT_REFILL_PERIOD:
       SOCKBOWL_AI_SERVER_DAILY_BUDGET:
       SOCKBOWL_AI_SERVER_ALLOWED_MODELS:
+      # DK-1 JVM caps; see the matching comment on sockbowl-game above.
+      JAVA_TOOL_OPTIONS: "${SOCKBOWL_QUESTIONS_JAVA_TOOL_OPTIONS:-}"
+      BPL_JVM_THREAD_COUNT: ${SOCKBOWL_QUESTIONS_JVM_THREAD_COUNT:-250}
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
       # healthcheck below execs the bundled JRE directly against this class.
@@ -416,6 +510,7 @@ services:
     profiles: ["full"]
     network_mode: "host"
     restart: unless-stopped
+    mem_limit: ${SOCKBOWL_NG_MEM_LIMIT:-0}
     labels:
       - com.centurylinklabs.watchtower.enable=true
       - com.centurylinklabs.watchtower.scope=${COMPOSE_PROJECT_NAME}
@@ -426,6 +521,12 @@ services:
       - SOCKBOWL_GAME_PORT=${SOCKBOWL_GAME_PORT}
       - SOCKBOWL_QUESTIONS_PORT=${SOCKBOWL_QUESTIONS_PORT}
       - KEYCLOAK_PORT=${KEYCLOAK_PORT}
+      # Bare passthrough on purpose (absent unless set): sockbowl-ng switches
+      # to single-host path mode (/api, /ws, /questions, /auth) only when
+      # SOCKBOWL_PUBLIC_URL is present, so it must NOT get the
+      # ${APP_PROTOCOL}://${APP_HOST} default the Keycloak init services use;
+      # otherwise port-mode dev would silently flip to path mode.
+      - SOCKBOWL_PUBLIC_URL
       # Compose is production-capable by default now (D9), so this falls back
       # to true; AUTH_ENABLED=false stays the supported local-dev opt-out.
       - AUTH_ENABLED=${AUTH_ENABLED:-true}

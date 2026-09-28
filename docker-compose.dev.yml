@@ -25,7 +25,22 @@
 # a future spec test wants to observe it); M4's own Playwright specs use tiny
 # limits from docker-compose.limits-e2e.yml, layered on top of this file, not
 # by lowering anything here.
+#
+# M7 (plans/m7-deploy.md §3.2, DK-3): the base file's sockbowl-game client
+# allows only ${SOCKBOWL_PUBLIC_URL}; this overlay adds the dev origins (the
+# `ng serve` port 4200 and the game port) through
+# SOCKBOWL_EXTRA_REDIRECT_ORIGINS, which reproduces the pre-M7 dev redirect
+# set. It also supplies a dev-only Redis password (check-secrets.sh refuses the
+# sockbowl-dev-* value outside ALLOW_INSECURE_DEFAULTS=true) to redis, game and
+# questions alike. Set SOCKBOWL_REDIS_PASSWORD= (explicitly empty) to run
+# Redis without auth for app images that predate SOCKBOWL_REDIS_PASSWORD.
 services:
+  redis:
+    environment:
+      - ALLOW_INSECURE_DEFAULTS=true
+      - SOCKBOWL_REDIS_PASSWORD=${SOCKBOWL_REDIS_PASSWORD-sockbowl-dev-redis-password}
+      - REDISCLI_AUTH=${SOCKBOWL_REDIS_PASSWORD-sockbowl-dev-redis-password}
+
   keycloak:
     command: start-dev --import-realm
     environment:
@@ -42,9 +57,11 @@ services:
       - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
       - SOCKBOWL_E2E=true
       - KC_ACCESS_TOKEN_LIFESPAN=${KC_ACCESS_TOKEN_LIFESPAN:-300}
+      - SOCKBOWL_EXTRA_REDIRECT_ORIGINS=${SOCKBOWL_EXTRA_REDIRECT_ORIGINS:-${APP_PROTOCOL}://${APP_HOST}:4200 ${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}}
 
   sockbowl-game:
     environment:
+      SOCKBOWL_REDIS_PASSWORD: "${SOCKBOWL_REDIS_PASSWORD-sockbowl-dev-redis-password}"
       SOCKBOWL_RL_DEFAULT_CAPACITY: "10000"
       SOCKBOWL_RL_SESSION_CREATE_CAPACITY: "1000"
       SOCKBOWL_RL_SESSION_JOIN_CAPACITY: "1000"
@@ -56,6 +73,7 @@ services:
 
   sockbowl-questions:
     environment:
+      SOCKBOWL_REDIS_PASSWORD: "${SOCKBOWL_REDIS_PASSWORD-sockbowl-dev-redis-password}"
       SOCKBOWL_RL_DEFAULT_CAPACITY: "10000"
       SOCKBOWL_RL_GRAPHQL_WRITE_CAPACITY: "1000"
       SOCKBOWL_RL_GRAPHQL_READ_CAPACITY: "5000"
