@@ -303,6 +303,7 @@ CREATED_GAME_TAG=0
 CREATED_QUESTIONS_TAG=0
 CREATED_NG_TAG=0
 STACK_UP=0
+JQ_DIR=""
 
 cleanup() {
   local rc=$?
@@ -449,18 +450,62 @@ do_security_headers() {
   echo "all 5 security headers present"
 }
 
+# scripts/smoke-auth.sh (owned outside this WP, unmodified) needs jq. The
+# slot exec image (mcr.microsoft.com/playwright:*-noble, see
+# scratchpad/slots/README.md) doesn't ship it — only host-networking mode's
+# plain host shell does. Fetch a static binary once, into the scratchpad
+# (so it lands somewhere slot.sh's exec container actually mounts, and so a
+# later run reuses it instead of re-fetching), and only ever *prepend* it
+# onto PATH for that one call, so nothing else the script or its own PATH
+# entries (node, npm, the browsers under /ms-playwright) needs goes missing.
+ensure_slot_jq() {
+  [ -n "$JQ_DIR" ] && return 0
+  JQ_DIR="$SLOT_SCRATCH_BASE/cc1-jq-bin"
+  if [ ! -x "$JQ_DIR/jq" ]; then
+    mkdir -p "$JQ_DIR"
+    echo "fetching a static jq into $JQ_DIR (the slot exec image has none; scripts/smoke-auth.sh needs it)"
+    curl -fsSL -o "$JQ_DIR/jq.download" \
+      "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+    chmod +x "$JQ_DIR/jq.download"
+    mv "$JQ_DIR/jq.download" "$JQ_DIR/jq"
+  fi
+}
+
 do_auth_on_smoke() {
   cd "$TMP/sockbowl-docker"
   local game_secret neo4j_pw
   game_secret="$(grep '^SOCKBOWL_GAME_BACKEND_SECRET=' .env | tail -n1 | cut -d= -f2-)"
   neo4j_pw="$(grep '^NEO4J_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
   echo "-- scripts/smoke-auth.sh"
-  stack_exec -w "$TMP/sockbowl-docker" \
-    -e "SOCKBOWL_GAME_BACKEND_SECRET=$game_secret" \
-    -e "NEO4J_PASSWORD=$neo4j_pw" \
-    -- scripts/smoke-auth.sh
+  if [ "$USE_SLOT" -eq 1 ]; then
+    ensure_slot_jq
+    stack_exec -w "$TMP/sockbowl-docker" \
+      -e "SOCKBOWL_GAME_BACKEND_SECRET=$game_secret" \
+      -e "NEO4J_PASSWORD=$neo4j_pw" \
+      -- bash -c "PATH=\"$JQ_DIR:\$PATH\" exec scripts/smoke-auth.sh"
+  else
+    stack_exec -w "$TMP/sockbowl-docker" \
+      -e "SOCKBOWL_GAME_BACKEND_SECRET=$game_secret" \
+      -e "NEO4J_PASSWORD=$neo4j_pw" \
+      -- scripts/smoke-auth.sh
+  fi
   echo "-- ng tests-auth/auth-login-play.spec.ts"
   ( cd "$TMP/sockbowl-ng" && npm ci --quiet ) || return 1
+  if [ "$USE_SLOT" -eq 1 ]; then
+    # The exec image ships one pinned Playwright version's browsers. Match
+    # it to whatever this clone's root package.json actually resolved
+    # (ng's own e2e/ can pin a different, older one — see the default in
+    # scratchpad/slots/README.md, "Change it if the e2e Playwright version
+    # changes"), so a Playwright bump here doesn't fail as a confusing
+    # "browserType.launch: Executable doesn't exist" instead of a clear
+    # image pull.
+    local pw_version
+    pw_version="$(node -p "require('$TMP/sockbowl-ng/node_modules/@playwright/test/package.json').version" 2>/dev/null || true)"
+    if [ -n "$pw_version" ]; then
+      export SLOT_EXEC_IMAGE="mcr.microsoft.com/playwright:v${pw_version}-noble"
+      echo "using slot exec image $SLOT_EXEC_IMAGE (this clone's resolved @playwright/test version)"
+    fi
+  fi
   stack_exec -w "$TMP/sockbowl-ng" \
     -e "SOCKBOWL_APP=http://localhost" \
     -- npx playwright test -c playwright.auth.config.ts tests-auth/auth-login-play.spec.ts
