@@ -14,8 +14,8 @@
 # Never use this overlay for a real deployment: ALLOW_INSECURE_DEFAULTS=true
 # disables the placeholder-secret refusal in scripts/check-secrets.sh.
 #
-# M4 (rate limiting / quotas, plans/m4-limits.md §2.10 "Dev/e2e overlay
-# values"): every Playwright worker and the bot harness share one IP, and M2's
+# M4 (rate limiting / quotas, docs/limits.md "Compose overlays"): every
+# Playwright worker and the bot harness share one IP, and M2's
 # and M3's e2e suites (plus normal local dev) must not get throttled by M4's
 # production-sized limits. This overlay therefore relaxes the *rate* policies
 # game and questions actually key by IP or by one shared local user, and

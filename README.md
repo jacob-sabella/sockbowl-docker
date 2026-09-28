@@ -67,13 +67,102 @@ The docker-compose stack includes:
 - **sockbowl-game**: Game session service
 - **sockbowl-questions**: Question management service
 - **sockbowl-ng**: Angular frontend
-- **Watchtower**: Auto-updates containers
+- **Watchtower**: Auto-updates containers, opt-in (`autoupdate` profile — see
+  "Watchtower / Docker socket" below)
+
+## Quick start from source
+
+This is the proven, from-source path: build each app's own image from a
+sibling checkout and bring up the full stack against them, without any
+GitHub Packages token or a pushed GHCR image. `scripts/clean-clone-test.sh`
+runs exactly this block, verbatim, against a throwaway clone on every commit
+that touches it — see `CLAUDE.md` "Working in this repo" before editing
+between the markers below.
+
+**Prerequisites:**
+- Docker and Docker Compose v2 (`docker compose version`).
+- Node.js 24+ (for `sockbowl-ng`'s production build). No JDK install needed —
+  `sockbowl-game` and `sockbowl-questions` provision their own via Gradle's
+  foojay toolchain resolver.
+- Ollama, with `mxbai-embed-large` pulled: `ollama pull mxbai-embed-large`
+  (see "Ollama embedding model" below — `sockbowl-questions` won't report
+  healthy without it).
+- This repo checked out as a sibling directory of `sockbowl-game`,
+  `sockbowl-questions` and `sockbowl-ng` (i.e. `../sockbowl-game` etc.,
+  relative to this repo, all resolve).
+
+**Steps** (run from this repo's root):
+
+<!-- clean-clone:begin -->
+```bash
+SOCKBOWL_PROJECT="${SOCKBOWL_PROJECT:-sockbowl-source}"
+MAVEN_REPO="${MAVEN_REPO:-$HOME/.m2/repository}"
+
+# 1. Questions: publish the models jar to the local Maven repo, then build
+#    its image. GITHUB_REPOSITORY must be a valid lowercase "owner/repo" —
+#    bootBuildImage's imageName defaults to ghcr.io/${GITHUB_REPOSITORY}:${version},
+#    and an unset GITHUB_REPOSITORY falls back to the literal "OWNER/REPO",
+#    which fails outright (Docker repository paths must be lowercase). It
+#    only has to be well-formed for this local, throwaway tag.
+(cd ../sockbowl-questions && \
+  GITHUB_REPOSITORY=jacob-sabella/sockbowl-questions \
+  ./gradlew publishToMavenLocal bootBuildImage -Dmaven.repo.local="$MAVEN_REPO")
+docker tag "$(docker images -q ghcr.io/*/sockbowl-questions* | head -1)" sockbowl-questions:local
+
+# 2. Game: build its image against the models jar just published above
+#    (no GitHub Packages token needed).
+(cd ../sockbowl-game && \
+  GITHUB_REPOSITORY=jacob-sabella/sockbowl-game \
+  ./gradlew bootBuildImage -Dmaven.repo.local="$MAVEN_REPO" -PsockbowlUseMavenLocal=true)
+docker tag "$(docker images -q ghcr.io/*/sockbowl-game* | head -1)" sockbowl-game:local
+
+# 3. ng: production build. The Dockerfile copies a pre-built dist/, so this
+#    must run before the compose build below.
+(cd ../sockbowl-ng && npm ci && npm run buildprod)
+
+# 4. Generate a real .env: copy the placeholders, then overwrite the
+#    CHANGE_ME_* secrets scripts/check-secrets.sh would otherwise refuse.
+cp .env.example .env
+{
+  echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+  echo "NEO4J_PASSWORD=$(openssl rand -hex 24)"
+  echo "KEYCLOAK_ADMIN_PASSWORD=$(openssl rand -hex 24)"
+  echo "KEYCLOAK_USER_PASSWORD=$(openssl rand -hex 24)"
+  echo "SOCKBOWL_GAME_BACKEND_SECRET=$(openssl rand -hex 24)"
+} >> .env
+
+# 5. Bring up the full stack (dev/e2e posture) against the images just built.
+docker compose -p "$SOCKBOWL_PROJECT" \
+  -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.build.yml \
+  --profile full up -d --build
+```
+<!-- clean-clone:end -->
+
+Then wait for every service to report healthy
+(`docker compose -p "$SOCKBOWL_PROJECT" ps`) and visit `http://localhost`.
+Tear down with:
+
+```bash
+docker compose -p "$SOCKBOWL_PROJECT" \
+  -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.build.yml \
+  --profile full down -v --remove-orphans
+```
+
+**What this proves, and what it doesn't:** this is the from-source path,
+verified end to end by `scripts/clean-clone-test.sh` against a real clean
+clone (no `.env`, no `node_modules`, no local build state — only committed
+files). The alternative *registry* path (pulling the published GHCR `:main`
+images instead of building them) is documented in "Usage" below, but can
+only be proven from a clean clone once those images have actually been
+pushed to GHCR.
 
 ## Usage
 
-The app services (`sockbowl-game`, `sockbowl-questions`, `sockbowl-ng`, `watchtower`)
-are gated behind the `full` Compose **profile**. This gives two workflows, in two
-postures (see "Authentication modes" below for the posture difference):
+The app services (`sockbowl-game`, `sockbowl-questions`, `sockbowl-ng`) are
+gated behind the `full` Compose **profile** (watchtower has its own
+`autoupdate` profile — see "Watchtower / Docker socket" below). This gives
+two workflows, in two postures (see "Authentication modes" below for the
+posture difference):
 
 **Infra only** (default) — start the backing services and run the app code from source
 (recommended for local development, since the published images may lag your local changes):
@@ -150,7 +239,7 @@ these defaults.
 ### Limits and quotas
 
 M4 adds Redis-backed rate limiting, abuse controls and per-role quotas to
-`sockbowl-game` and `sockbowl-questions` (see `plans/m4-limits.md` for the
+`sockbowl-game` and `sockbowl-questions` (see `docs/limits.md` for the
 full design). `sockbowl-questions` now depends on `redis` (`condition:
 service_healthy`) and shares game's Redis host/port/DB index, so both
 services' limiter, quota and ban keys land together.
@@ -255,8 +344,21 @@ and it should never be set in a real deployment's `.env`.
 
 ### Watchtower / Docker socket
 
-Watchtower (part of the `full` profile) needs the host's Docker socket bind-mounted in
-to watch and auto-update the app containers. The default, `DOCKER_SOCKET_PATH=/var/run/docker.sock`,
+Watchtower is **opt-in**, in its own `autoupdate` Compose profile (not part of
+`full`): `containrrr/watchtower` is archived upstream (no more releases or
+security fixes), so auto-pulling and restarting containers from an
+unmaintained image is a worse default than requiring an explicit opt-in.
+`nickfedor/watchtower` is the actively maintained fork and a likely drop-in
+replacement, not switched to yet since it hasn't been smoke-tested against
+this compose file.
+
+To bring it up alongside the app stack:
+```bash
+docker compose --profile full --profile autoupdate up -d
+```
+
+It needs the host's Docker socket bind-mounted in to watch and auto-update
+the app containers. The default, `DOCKER_SOCKET_PATH=/var/run/docker.sock`,
 matches **rootful** Docker (Docker Desktop, and most Linux installs where the daemon
 runs as root). If your host runs **rootless** Docker instead, the socket lives under
 your user's runtime dir — set this in `.env`:

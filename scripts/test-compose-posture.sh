@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# test-compose-posture.sh — WP-D2 acceptance tests (plans/m2-auth.md, "WP-D2:
-# Compose posture (D9): prod default plus dev/e2e overlay").
+# test-compose-posture.sh — compose posture acceptance tests (D9: prod
+# default plus dev/e2e overlay; see docs/auth.md "Compose posture").
 #
 #  (a) .env.example copied as-is, no overlay -> keycloak-realm-init exits
 #      non-zero with scripts/check-secrets.sh's placeholder-secret message.
@@ -11,16 +11,15 @@
 #  (c) without the overlay but with real secrets set -> demo users are
 #      disabled.
 #
-# (b) and (c) exercise the *reconciling* RBAC loader (WP-D1: keycloak/clients/
-# *.json, and the "clients"/"demoUsers" keys in keycloak/rbac-model.json).
-# Until WP-D1 is merged onto this branch, this script detects that those
-# artifacts are absent and SKIPs (b) and (c) with an explicit message instead
-# of failing, so it is runnable standalone on goal/m2-auth-d2 and turns fully
-# green once WP-D1 lands (no changes needed here).
+# (b) and (c) exercise the *reconciling* RBAC loader (keycloak/clients/
+# *.json, and the "clients"/"demoUsers" keys in keycloak/rbac-model.json). If
+# those artifacts are ever absent from a branch under test, this script
+# detects that and SKIPs (b) and (c) with an explicit message instead of
+# failing.
 #
 # Uses network_mode: host (like the rest of this compose file), so it cannot
 # run concurrently with another full/keycloak+postgres stack on this host —
-# serialize full-stack runs (see PROGRESS.md risk #6).
+# serialize full-stack runs (see docs/auth.md "Single full-stack constraint").
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -1,15 +1,14 @@
 #!/usr/bin/env node
-// stomp-probe.mjs — WP-D3 acceptance test (plans/m2-auth.md, "WP-D3: Full-stack
-// auth smoke and spec reconciliation"), the STOMP half of scripts/smoke-auth.sh.
+// stomp-probe.mjs — the STOMP half of scripts/smoke-auth.sh.
 //
 // A tiny @stomp/stompjs + ws probe against a real sockbowl-game STOMP endpoint
-// (plan section 2.5: StompInboundInterceptor, StompConnectAuthenticator,
+// (see docs/auth.md: StompInboundInterceptor, StompConnectAuthenticator,
 // StompDestinationGuard). It takes one argument, a JSON config file describing
 // the seats and tokens scripts/smoke-auth.sh already set up over REST/GraphQL/
 // Keycloak, and runs a fixed suite of CONNECT/SEND/SUBSCRIBE scenarios against
-// them: every STOMP row in section 4.1, including the four WP-D3 names by name
+// them: every STOMP authorization case, named explicitly
 // (forged SEND, cross-game SUBSCRIBE, bad secret, banned CONNECT), plus the
-// service-to-service proof (AUTH-18): the game fetching a packet from
+// service-to-service proof: the game fetching a packet from
 // questions with its own service token, driven end-to-end over a real STOMP
 // SetMatchPacket.
 //

@@ -1,5 +1,4 @@
-# M4 limits e2e overlay (plans/m4-limits.md §2.10 "Dev/e2e overlay values",
-# WP-D1).
+# M4 limits e2e overlay (docs/limits.md "Compose overlays").
 #
 # docker-compose.dev.yml relaxes rate limits and hosted-session quotas so
 # M2's and M3's Playwright suites (and normal local dev) aren't throttled by

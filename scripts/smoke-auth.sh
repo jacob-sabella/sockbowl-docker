@@ -1,26 +1,25 @@
 #!/usr/bin/env bash
 #
-# smoke-auth.sh — WP-D3 acceptance test (plans/m2-auth.md, "WP-D3: Full-stack
-# auth smoke and spec reconciliation").
+# smoke-auth.sh — full-stack auth smoke test.
 #
-# Runs the plan's section 4.1 REST/GraphQL/STOMP authorization matrix for real,
-# against an already-running full stack with AUTH_ENABLED=true (the e2e/dev
-# overlay: docker-compose.yml + docker-compose.dev.yml, per README.md
-# "Authentication modes"). It does not bring the stack up or down itself —
-# that's the caller's job (see plans/m2-auth.md section 4.2 step 5, and
+# Runs the REST/GraphQL/STOMP authorization matrix for real, against an
+# already-running full stack with AUTH_ENABLED=true (the e2e/dev overlay:
+# docker-compose.yml + docker-compose.dev.yml, per README.md "Authentication
+# modes" and docs/auth.md). It does not bring the stack up or down itself —
+# that's the caller's job (see scripts/clean-clone-test.sh and
 # scripts/test-compose-posture.sh for the compose lifecycle pattern).
 #
 # What it checks:
-#   - game & questions REST: every row in section 4.1 (anonymous, wrong role,
-#     wrong owner, banned, service-token-as-user), using real Keycloak tokens
-#     minted via the sockbowl-e2e password grant and a sockbowl-game-backend
+#   - game & questions REST: anonymous, wrong role, wrong owner, banned, and
+#     service-token-as-user cases, using real Keycloak tokens minted via the
+#     sockbowl-e2e password grant and a sockbowl-game-backend
 #     client-credentials token.
 #   - questions GraphQL: an UNAUTHORIZED and a FORBIDDEN mutation
 #     classification, an anonymous getPacketById on a DRAFT (null), and a
 #     PUBLISHED packet's answers redacted for an anonymous reader.
 #   - game STOMP: delegated to scripts/stomp-probe.mjs (forged SEND, cross-game
-#     SUBSCRIBE, bad secret, banned CONNECT, and every other section-4.1 STOMP
-#     row), plus the AUTH-18 service-token proof (SetMatchPacket succeeding
+#     SUBSCRIBE, bad secret, banned CONNECT, and every other STOMP
+#     authorization row), plus the service-token proof (SetMatchPacket succeeding
 #     only because the game fetched the packet from questions with its own
 #     service token).
 #
@@ -34,7 +33,7 @@
 #   SOCKBOWL_QUESTIONS_PORT, DEMO_PASSWORD, SOCKBOWL_GAME_BACKEND_SECRET
 #     (required: the stack's rbac-init rotates the sockbowl-game-backend
 #     secret to this value on every load-rbac.sh run, so there is no safe
-#     built-in default here), KEYCLOAK_ISSUER_URI (plan risk #5: a minted
+#     built-in default here), KEYCLOAK_ISSUER_URI (a minted
 #     token's `iss` must equal this exactly, or every service's issuer
 #     validation fails; defaults to the same computed URL docker-compose.yml's
 #     KEYCLOAK_ISSUER_URI defaults to), NEO4J_HTTP_PORT, NEO4J_USER,

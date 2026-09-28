@@ -3,7 +3,7 @@
 # The "full" profile defaults to the published GHCR `:main` images. Layer this
 # file on top of docker-compose.yml (plus docker-compose.dev.yml for e2e) to
 # run against locally built code instead, e.g. for the full-stack smoke test
-# and Playwright e2e in plans/m2-auth.md section 4.2.
+# and Playwright e2e (see scripts/clean-clone-test.sh and docs/auth.md).
 #
 #   docker compose -p sockbowl-e2e -f docker-compose.yml -f docker-compose.dev.yml \
 #     -f docker-compose.build.yml --profile full up -d --build

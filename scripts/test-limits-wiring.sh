@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 #
-# test-limits-wiring.sh — WP-D1 acceptance test (plans/m4-limits.md §3
-# "WP-D1: Compose and env wiring (docker)").
+# test-limits-wiring.sh — M4 rate-limit/quota compose and env wiring
+# acceptance test (see docs/limits.md).
 #
-# Verifies the M4 rate-limit/quota compose & env *wiring* this WP adds —
+# Verifies the compose & env *wiring* for M4 rate limiting and quotas —
 # independent of whether the sockbowl-game/sockbowl-questions images this
-# script is run against already implement the limiter core itself. G1
-# (game) and Q1 (questions) land in parallel waves of the same plan and may
-# not be merged onto the branch/images in use when this script runs
-# standalone (D1 has no dependency on them — see the plan's wave table).
-# This follows the same "artifacts absent -> SKIP with an explicit message"
-# pattern scripts/test-compose-posture.sh already uses for WP-D1-in-M2.
+# script is run against already implement the limiter core itself; if a
+# checked-out branch or a published image predates the limiter core, this
+# follows the same "artifacts absent -> SKIP with an explicit message"
+# pattern scripts/test-compose-posture.sh uses.
 #
 # Brings up a throwaway full-profile stack (base + dev overlay, so
 # ALLOW_INSECURE_DEFAULTS lets .env.example's placeholder secrets through —
@@ -19,7 +17,7 @@
 # and checks:
 #
 #   1. `docker compose config -q` validates for all three file-set
-#      combinations this plan calls out: base, base+dev, base+dev+limits-e2e.
+#      combinations: base, base+dev, base+dev+limits-e2e.
 #   2. sockbowl-questions only starts once redis is healthy (its
 #      `depends_on: redis: condition: service_healthy`), and Redis itself
 #      answers PING (game and questions run shell-less JRE-only images with
@@ -37,8 +35,7 @@
 #      and block game/ng from starting via depends_on: service_healthy). This
 #      check is only proof questions itself came up and answers requests; see
 #      the LIMITS_WIRING_LIVE section below for the actual Redis-down proof.
-#   4b. LIMITS_WIRING_LIVE=true only (the live gate — see plans/m4-fix2.md's
-#       "Done gate" §(b)3): stops the shared redis container, asserts
+#   4b. LIMITS_WIRING_LIVE=true only (the live gate): stops the shared redis container, asserts
 #       questions' /actuator/health is STILL UP and a GraphQL read still
 #       answers HTTP 200 (proving D12's fail-open contract for real, not just
 #       via the disabled health indicator), then restarts redis and waits for
@@ -50,9 +47,8 @@
 #      writes `rl:*` keys to Redis — i.e., the running image already has
 #      RateLimitService/RequestGuardFilter from G1/G2 — asserts
 #      `redis-cli KEYS 'rl:*'` is non-empty. Otherwise SKIPs this one
-#      assertion with an explicit message. V1 re-runs this script once every
-#      WP is merged onto goal/m4-limits and locally built, and it must PASS
-#      for real at that point (see plan §3 D1 "Acceptance").
+#      assertion with an explicit message. Re-run this script once the
+#      limiter core is merged and locally built; it must PASS for real then.
 #
 # Usage: scripts/test-limits-wiring.sh
 #   LIMITS_WIRING_PROJECT          compose project name (default sockbowl-m4wiring-<pid>)
@@ -65,14 +61,14 @@
 #   LIMITS_WIRING_NG_IMAGE         override SOCKBOWL_NG_IMAGE          :main image)
 #     Use these to point at locally built images (e.g. sockbowl-questions:local, from
 #     docker-compose.build.yml's own `./gradlew bootBuildImage` recipe) when the published
-#     :main image can't start for a reason this WP doesn't own — e.g. the pre-existing
-#     ChatModel-bean-ambiguity crash tracked in PROGRESS.md's M1 baseline-fixes note, fixed
-#     on later goal branches but not in :main, since nothing here is ever pushed to it.
+#     :main image can't start for a reason outside this script's control — e.g. a
+#     Spring AI ChatModel-bean-ambiguity crash fixed on later goal branches but not
+#     in :main, since nothing here is ever pushed to it.
 #
 # Requires docker (compose v2) and jq. Uses network_mode: host like the rest
 # of this compose file, so it cannot run concurrently with another full
-# stack on this host — serialize full-stack runs (see PROGRESS.md's
-# orchestration notes); the *caller* is responsible for that machine-wide
+# stack on this host — serialize full-stack runs (see docs/auth.md "Single
+# full-stack constraint"); the *caller* is responsible for that machine-wide
 # lock, not this script.
 set -euo pipefail
 shopt -s inherit_errexit
