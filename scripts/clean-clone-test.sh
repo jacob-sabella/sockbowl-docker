@@ -366,10 +366,25 @@ do_build_and_up() {
   # Everything else (`docker tag`, `docker images -q`, the gradle/npm
   # sub-shells) is untouched. Exported so it reaches the `bash "$block_file"`
   # child process below.
+  #
+  # IMPORTANT (see scratchpad/slots/README.md "Incident 2026-09-28 ~18:30:
+  # fork bomb"): an exported bash function is inherited by every descendant
+  # bash process, not just the one direct child we intend it for. slot.sh is
+  # itself a bash script that calls `docker compose` internally to actually
+  # run the command against the generated overlay; without the `unset -f
+  # docker` below, that inner call would hit this same shadow again, forward
+  # back into slot.sh again, and so on without end. So the slot-routing
+  # branch unsets the shadow (removing its exported `BASH_FUNC_docker%%`
+  # from the environment) *before* forking off to slot.sh, so slot.sh's own
+  # subprocess tree never sees it. slot.sh now also defends against this
+  # itself (it unsets any inherited `docker` function at startup and aborts
+  # past a recursion-depth guard), but this script must not rely on that as
+  # its only safeguard.
   # shellcheck disable=SC2329
   docker() {
     if [ "${SOCKBOWL_CC_USE_SLOT:-0}" = "1" ] && [ "${1:-}" = "compose" ]; then
       shift
+      unset -f docker
       "$SOCKBOWL_CC_SLOT_SH" "$SOCKBOWL_CC_SLOT_N" compose "$@"
     else
       command docker "$@"
