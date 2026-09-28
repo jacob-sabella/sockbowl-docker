@@ -476,6 +476,16 @@ do_auth_on_smoke() {
   local game_secret neo4j_pw
   game_secret="$(grep '^SOCKBOWL_GAME_BACKEND_SECRET=' .env | tail -n1 | cut -d= -f2-)"
   neo4j_pw="$(grep '^NEO4J_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
+  # smoke-auth.sh's STOMP rows delegate to scripts/stomp-probe.mjs, whose
+  # deps (scripts/package.json: @stomp/stompjs, ws) are never installed by
+  # anything in the clean-clone block itself — smoke-auth.sh doesn't
+  # self-install them despite that package.json's own comment ("runs `npm
+  # install` here before invoking the probe"); only auth-smoke.yml's own
+  # separate `npm install` (working-directory: scripts) step does. Without
+  # this, the probe crashes with ERR_MODULE_NOT_FOUND on every clean clone,
+  # slot or host alike, and smoke-auth.sh only *logs* that as one more
+  # FAIL row rather than a hard stop — so it's easy to miss.
+  ( cd "$TMP/sockbowl-docker/scripts" && npm ci --quiet ) || return 1
   echo "-- scripts/smoke-auth.sh"
   if [ "$USE_SLOT" -eq 1 ]; then
     ensure_slot_jq
