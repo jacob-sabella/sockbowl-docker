@@ -30,8 +30,22 @@
 #      environment when no active layer sets it (the bare `KEY:` passthrough
 #      contract documented in docker-compose.yml's M4 comment block), never
 #      the literal string "null".
-#   4. questions' /actuator/health reports UP overall (a necessary condition
-#      for its Redis health indicator to be checked at all).
+#   4. questions' /actuator/health reports UP overall. This does NOT prove
+#      Redis connectivity: Q-V1-03 sets management.health.redis.enabled=false
+#      in questions' MAIN application.yml (D12 — its Redis use fails open on
+#      an outage, so a Redis blip must not turn questions' compose health red
+#      and block game/ng from starting via depends_on: service_healthy). This
+#      check is only proof questions itself came up and answers requests; see
+#      the LIMITS_WIRING_LIVE section below for the actual Redis-down proof.
+#   4b. LIMITS_WIRING_LIVE=true only (the live gate — see plans/m4-fix2.md's
+#       "Done gate" §(b)3): stops the shared redis container, asserts
+#       questions' /actuator/health is STILL UP and a GraphQL read still
+#       answers HTTP 200 (proving D12's fail-open contract for real, not just
+#       via the disabled health indicator), then restarts redis and waits for
+#       it to report healthy again before continuing. Skipped by default
+#       because it interrupts the one shared Redis both apps depend on for
+#       the rest of this run's checks (including 5 below) — never combine it
+#       with LIMITS_WIRING_KEEP=true.
 #   5. If a curl burst against game's session-create endpoint actually
 #      writes `rl:*` keys to Redis — i.e., the running image already has
 #      RateLimitService/RequestGuardFilter from G1/G2 — asserts
@@ -43,6 +57,9 @@
 # Usage: scripts/test-limits-wiring.sh
 #   LIMITS_WIRING_PROJECT          compose project name (default sockbowl-m4wiring-<pid>)
 #   LIMITS_WIRING_KEEP             true keeps the stack up after the run (default false)
+#   LIMITS_WIRING_LIVE             true runs the Redis-stop/restart check (4b above); only
+#                                   at the live gate (owns the fullstack.lock and a single
+#                                   full stack machine-wide) — default false skips it
 #   LIMITS_WIRING_GAME_IMAGE       override SOCKBOWL_GAME_IMAGE (default: .env.example's
 #   LIMITS_WIRING_QUESTIONS_IMAGE  override SOCKBOWL_QUESTIONS_IMAGE   published ghcr.io
 #   LIMITS_WIRING_NG_IMAGE         override SOCKBOWL_NG_IMAGE          :main image)
@@ -207,20 +224,60 @@ check_env sockbowl-game SOCKBOWL_RL_SERVICE_CLIENTS ""
 check_env sockbowl-game SOCKBOWL_TRUSTED_PROXIES_REGEX ""
 check_env sockbowl-questions SOCKBOWL_AI_SERVER_ALLOWED_MODELS ""
 
-section "questions' /actuator/health reports UP (proof it can reach its dependencies, redis included)"
+section "questions' /actuator/health reports UP (proof questions itself is reachable)"
 # management.endpoint.health.show-details=never (deliberate, security: no
 # auth guards most actuator paths) means the JSON is always the bare
-# {"status":"UP"|"DOWN"} with no per-component breakdown, for every service,
-# regardless of whether Q1 (spring-boot-starter-data-redis) is merged onto
-# this image. Spring Boot's aggregate health status is DOWN if any
-# registered indicator (once Q1 adds Redis's) is down, so overall UP is the
-# only externally-observable proxy the plan's "reports Redis UP" wording can
-# mean here — there is no component field to assert on separately.
+# {"status":"UP"|"DOWN"} with no per-component breakdown, so there is no
+# component field to assert on separately here. This is NOT proof of Redis
+# connectivity: questions' MAIN application.yml sets
+# management.health.redis.enabled=false (Q-V1-03, D12) precisely so a Redis
+# outage does not flip this to DOWN — see the LIMITS_WIRING_LIVE section
+# right below for the check that actually exercises a Redis outage.
 HEALTH_JSON="$(curl -sS -f "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}/actuator/health" || true)"
 if [ -n "$HEALTH_JSON" ] && echo "$HEALTH_JSON" | jq -e '.status == "UP"' >/dev/null 2>&1; then
   pass "questions /actuator/health status=UP"
 else
   fail "questions /actuator/health did not report UP: ${HEALTH_JSON:-<empty response>}"
+fi
+
+if [ "${LIMITS_WIRING_LIVE:-false}" = "true" ]; then
+  section "LIMITS_WIRING_LIVE: redis down -> questions health stays UP and GraphQL still answers 200"
+  # D12 (questions, WP-FIX-Q Q-V1-03): questions' Redis use (limiters, quotas,
+  # ban mirror) fails open on an outage, and management.health.redis.enabled
+  # =false keeps the health endpoint from reflecting Redis at all. This is
+  # the real end-to-end proof, stopping the actual shared redis container
+  # (not just reading a disabled indicator) — the health check and a plain
+  # GraphQL read must both keep working while it's down.
+  compose stop redis >/dev/null 2>&1 || true
+  REDIS_DOWN_HEALTH="$(curl -sS -f "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}/actuator/health" || true)"
+  if [ -n "$REDIS_DOWN_HEALTH" ] && echo "$REDIS_DOWN_HEALTH" | jq -e '.status == "UP"' >/dev/null 2>&1; then
+    pass "questions /actuator/health stays UP with redis stopped"
+  else
+    fail "questions /actuator/health did not stay UP with redis stopped: ${REDIS_DOWN_HEALTH:-<empty response>}"
+  fi
+  GQL_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"query":"{ getAllCategories { id } }"}' \
+    "${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}/graphql" || true)"
+  if [ "$GQL_CODE" = "200" ]; then
+    pass "a GraphQL read (getAllCategories) still answers 200 with redis stopped"
+  else
+    fail "GraphQL read got HTTP $GQL_CODE with redis stopped, expected 200"
+  fi
+  compose start redis >/dev/null 2>&1 || true
+  REDIS_RESTARTED=false
+  for _ in $(seq 1 20); do
+    if [ "$(compose ps -a --format '{{.Health}}' redis 2>/dev/null || true)" = "healthy" ]; then
+      REDIS_RESTARTED=true
+      break
+    fi
+    sleep 3
+  done
+  if [ "$REDIS_RESTARTED" = "true" ]; then
+    pass "redis restarted and reports healthy again"
+  else
+    fail "redis did not report healthy again within the timeout after restart"
+  fi
 fi
 
 section "a request burst against game writes rl:* keys to redis (requires G1+G2 merged)"
