@@ -379,10 +379,12 @@ expect_status "POST /api/qbreader/import-random: player -> 200, an EPHEMERAL pac
 req POST "$QUESTIONS_URL/api/qbreader/import-random" "$TOKEN_AUTHOR" '{"tossupCount":3,"bonusCount":3}'
 expect_status "POST /api/qbreader/import-random: author -> 200, an owned DRAFT packet" 200 "$CODE"
 
-req GET "$QUESTIONS_URL/api/packets/generate?topic=Science" ""
-expect_status "GET /api/packets/generate: anonymous -> 401" 401 "$CODE"
-req GET "$QUESTIONS_URL/api/packets/generate?topic=Science" "$TOKEN_PLAYER"
-expect_status "GET /api/packets/generate: player -> 403" 403 "$CODE"
+# M4 (D11) made generation POST-only with a JSON body (GeneratePacketRequest);
+# the old GET form now answers 405 before authorization is even consulted.
+req POST "$QUESTIONS_URL/api/packets/generate" "" '{"topic":"Science","questionCount":1,"generateBonuses":false}'
+expect_status "POST /api/packets/generate: anonymous -> 401" 401 "$CODE"
+req POST "$QUESTIONS_URL/api/packets/generate" "$TOKEN_PLAYER" '{"topic":"Science","questionCount":1,"generateBonuses":false}'
+expect_status "POST /api/packets/generate: player -> 403" 403 "$CODE"
 
 req GET "$GAME_URL/actuator/health" ""
 expect_status "GET game /actuator/health: public -> 200" 200 "$CODE"
