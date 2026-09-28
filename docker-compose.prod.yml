@@ -1,0 +1,229 @@
+# Prod overlay (WP-D2, plans/m7-deploy.md §4.1): bridge networking, no host
+# ports, joins the EXISTING aa-caddy reverse proxy's network (D25). Used as:
+#
+#   docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml \
+#     --profile full up -d
+#
+# Requires Compose 2.24+ for the `!reset` / `!override` merge tags below (this
+# repo's dev host runs 5.5, the VPS runs 5.0.0 — both are new enough).
+#
+# What this file does, and does NOT do:
+#   - Every service loses its base `network_mode: host` (`!reset null`, which
+#     deletes the key rather than setting it to a falsy value — Compose
+#     requires it to be entirely absent once `networks:` is used) and joins
+#     the private `internal` bridge network. Only the four public-facing
+#     services (keycloak, sockbowl-game, sockbowl-questions, sockbowl-ng)
+#     also join `edge`, the pre-existing external network aa-caddy's other
+#     sites already run on, under a project-scoped alias so several `-p`
+#     projects (the real "sockbowl-prod" and V1/rehearsal throwaways) can
+#     join the same edge network without their container names colliding.
+#   - Every service address that the base file resolves from
+#     SOCKBOWL_INTERNAL_HOST/APP_HOST (host-network dev, D1 §3.2) is instead
+#     pointed straight at the sibling service's Compose name: kafka:9092,
+#     redis, postgres:5432, bolt://neo4j:7687. SOCKBOWL_INTERNAL_HOST itself
+#     is deliberately left UNSET (see .env.prod.example): a single shared
+#     "internal host" value cannot address four differently-named services at
+#     once on a bridge network, unlike host-network dev where they're all
+#     "localhost". Keycloak's own internal address is instead carried in
+#     KEYCLOAK_INTERNAL_URL=http://keycloak:8080/auth (.env.prod.example),
+#     which the BASE file's rbac-init/game/questions blocks already
+#     substitute into KEYCLOAK_URL / KEYCLOAK_JWK_SET_URI / KEYCLOAK_TOKEN_URI
+#     — no override needed here for those three.
+#   - No service in this file declares a `ports:` mapping, and none of the
+#     services it touches has one in the base file either. Every backend is
+#     reachable only through aa-caddy on `edge`; game, questions, postgres,
+#     redis, neo4j and kafka are never bound to a host port in prod. That is
+#     what makes the shared VPS's other tenants (mage-*, aa-*) and the old
+#     sockbowl stack's ports (§1.1) unaffected by this stack coming up.
+#   - D26 (Cloudflare wiring, owner decision): sockbowl-game and
+#     sockbowl-questions get SOCKBOWL_FORWARD_HEADERS_STRATEGY=native and
+#     SOCKBOWL_REMOTE_IP_HEADER=CF-Connecting-IP hardcoded here (not
+#     env-driven — every prod deploy of this overlay wants them, there is no
+#     "prod without them" variant), while the internal-proxies regex itself
+#     — the exact, anchored peer address of aa-caddy on `edge`, which is
+#     host/deploy-specific and only known at deploy time — comes from
+#     .env's SOCKBOWL_TRUSTED_PROXIES_REGEX and is passed through under BOTH
+#     the M7 name (SOCKBOWL_INTERNAL_PROXIES, preferred) and the M4 fallback
+#     name (SOCKBOWL_TRUSTED_PROXIES_REGEX) the apps also accept, so this
+#     works regardless of which one a given app build resolves first. This is
+#     safe only together with Cloudflare Authenticated Origin Pulls, enforced
+#     at aa-caddy (scripts/deploy/render-caddy.sh --mode prod, WP-D3/L4) —
+#     without AOP a client can forge CF-Connecting-IP directly against the
+#     origin, since nothing here can tell a real Cloudflare edge apart from
+#     anyone else who can reach aa-caddy's port.
+#   - DK-3 (Redis auth): SOCKBOWL_REDIS_PASSWORD is already wired end to end
+#     by the base file for redis, sockbowl-game and sockbowl-questions (see
+#     docker-compose.yml's DK-3 comments) — .env's value is all that's
+#     needed, no override here. The one thing genuinely specific to bridge
+#     networking is SOCKBOWL_REDIS_BIND: the base default (127.0.0.1 -::1) is
+#     the host-network equivalent of "no published port"; on `internal`
+#     there is no host port to begin with, so redis must instead listen on
+#     every interface *inside its own network namespace* to stay reachable
+#     from sibling containers, which stays exactly as private as the base
+#     file's loopback bind was (no ports: means nothing outside `internal`,
+#     i.e. nothing outside this compose project's own containers, can reach
+#     it either way).
+#   - Watchtower is excluded from the "full" profile it ships under in the
+#     base file, via `!override` on `profiles` (not `!reset`, since the key
+#     must still exist so the service compiles) so that requesting
+#     `--profile full` never matches it — it must never run on this shared
+#     host (mage-watchtower already does, D25) and the app services also
+#     carry watchtower.enable=false as a second, independent guard.
+
+networks:
+  internal: {}
+  edge:
+    external: true
+    name: ${SOCKBOWL_EDGE_NETWORK:-aa-web_default}
+
+services:
+  kafka:
+    network_mode: !reset null
+    networks: [internal]
+    mem_limit: ${SOCKBOWL_KAFKA_MEM_LIMIT:-640m}
+    environment:
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      # DK-1: the image's default heap (-Xmx1G) does not fit a 640m limit.
+      - KAFKA_HEAP_OPTS=${KAFKA_HEAP_OPTS:--Xms384m -Xmx384m}
+
+  postgres:
+    network_mode: !reset null
+    networks: [internal]
+    mem_limit: ${SOCKBOWL_POSTGRES_MEM_LIMIT:-256m}
+
+  redis:
+    network_mode: !reset null
+    networks: [internal]
+    mem_limit: ${SOCKBOWL_REDIS_MEM_LIMIT:-192m}
+    environment:
+      # See the header comment: no host port exists on `internal` either way,
+      # so this is not a wider exposure than the base file's loopback bind.
+      - SOCKBOWL_REDIS_BIND=${SOCKBOWL_REDIS_BIND:-* -::*}
+      - SOCKBOWL_REDIS_MAXMEMORY=${SOCKBOWL_REDIS_MAXMEMORY:-128mb}
+
+  neo4j:
+    network_mode: !reset null
+    networks: [internal]
+    mem_limit: ${SOCKBOWL_NEO4J_MEM_LIMIT:-1100m}
+    environment:
+      # DK-1: Neo4j sizes heap/page cache from HOST memory, not the container
+      # limit, unless told otherwise.
+      - NEO4J_server_memory_heap_initial__size=${NEO4J_server_memory_heap_initial__size:-512m}
+      - NEO4J_server_memory_heap_max__size=${NEO4J_server_memory_heap_max__size:-512m}
+      - NEO4J_server_memory_pagecache_size=${NEO4J_server_memory_pagecache_size:-384m}
+
+  neo4j-plugin-init:
+    network_mode: !reset null
+    networks: [internal]
+
+  neo4j-data-import:
+    network_mode: !reset null
+    networks: [internal]
+    environment:
+      - NEO4J_HOST=neo4j
+
+  keycloak-realm-init:
+    network_mode: !reset null
+    networks: [internal]
+
+  keycloak:
+    network_mode: !reset null
+    mem_limit: ${SOCKBOWL_KEYCLOAK_MEM_LIMIT:-900m}
+    networks:
+      internal: {}
+      edge:
+        aliases: ["${SOCKBOWL_EDGE_PREFIX:-sockbowl-prod}-keycloak"]
+    environment:
+      # §3.5. Hostname v2, full URL (KC_HOSTNAME_STRICT below is what makes
+      # this authoritative for `iss`, redirects and cookies).
+      - KC_HOSTNAME=${SOCKBOWL_PUBLIC_URL}/auth
+      - KC_HTTP_RELATIVE_PATH=/auth
+      - KC_PROXY_HEADERS=xforwarded
+      - KC_DB_URL=jdbc:postgresql://postgres:5432/keycloak
+      # NOT carried over from the old override (§3.5): KC_PROXY (removed in
+      # 26) and KC_FEATURES=declarative-user-profile (always on in 26).
+    healthcheck:
+      # §3.4/§3.5 (WP-D2 "done when"): confirmed on a real container — the
+      # management port's health path picks up KC_HTTP_RELATIVE_PATH, so it
+      # moves to /auth/health/ready along with everything else. If a future
+      # Keycloak image changes that default, set
+      # KC_HTTP_MANAGEMENT_RELATIVE_PATH=/ explicitly and revert this path.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /auth/health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  rbac-init:
+    network_mode: !reset null
+    networks: [internal]
+
+  sockbowl-game:
+    network_mode: !reset null
+    # Images are docker-loaded from the local build (§4.4), never pulled.
+    pull_policy: never
+    mem_limit: ${SOCKBOWL_GAME_MEM_LIMIT:-700m}
+    networks:
+      internal: {}
+      edge:
+        aliases: ["${SOCKBOWL_EDGE_PREFIX:-sockbowl-prod}-game"]
+    labels: !override
+      - "com.centurylinklabs.watchtower.enable=false"
+    environment:
+      SOCKBOWL_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      SOCKBOWL_REDIS_HOST: "redis"
+      SOCKBOWL_DB_URL: "jdbc:postgresql://postgres:5432/sockbowl_users"
+      SOCKBOWL_QUESTIONS_URL: "${SOCKBOWL_QUESTIONS_INTERNAL_URL:-http://sockbowl-questions:7009/}"
+      SOCKBOWL_GAME_ALLOWED_ORIGINS: "${SOCKBOWL_PUBLIC_URL}"
+      # D26: see the header comment. Both the M7 and M4 env names are set to
+      # the same value on purpose.
+      SOCKBOWL_FORWARD_HEADERS_STRATEGY: "native"
+      SOCKBOWL_INTERNAL_PROXIES: "${SOCKBOWL_TRUSTED_PROXIES_REGEX}"
+      SOCKBOWL_TRUSTED_PROXIES_REGEX: "${SOCKBOWL_TRUSTED_PROXIES_REGEX}"
+      SOCKBOWL_REMOTE_IP_HEADER: "CF-Connecting-IP"
+
+  sockbowl-questions:
+    network_mode: !reset null
+    pull_policy: never
+    mem_limit: ${SOCKBOWL_QUESTIONS_MEM_LIMIT:-750m}
+    networks:
+      internal: {}
+      edge:
+        aliases: ["${SOCKBOWL_EDGE_PREFIX:-sockbowl-prod}-questions"]
+    labels: !override
+      - "com.centurylinklabs.watchtower.enable=false"
+    environment:
+      SOCKBOWL_NEO4J_URL: "bolt://neo4j:7687"
+      SOCKBOWL_REDIS_HOST: "redis"
+      SOCKBOWL_ALLOWED_ORIGINS: "${SOCKBOWL_PUBLIC_URL}"
+      # §3.4/H6: the old prod AI set, proven by WP-Q1's OldProdAiEnvironmentBootIT.
+      # The base file has no passthrough for these three (questions' Ollama
+      # embedding path needs no chat/embedding-model env at all today), so
+      # they're added here rather than left to an unwired .env key.
+      SPRING_AI_MODEL_CHAT: "${SPRING_AI_MODEL_CHAT:-openai}"
+      SPRING_AI_MODEL_EMBEDDING: "${SPRING_AI_MODEL_EMBEDDING:-openai}"
+      SPRING_AUTOCONFIGURE_EXCLUDE: "${SPRING_AUTOCONFIGURE_EXCLUDE:-org.springframework.ai.vectorstore.neo4j.autoconfigure.Neo4jVectorStoreAutoConfiguration}"
+      # D26: see the header comment on sockbowl-game.
+      SOCKBOWL_FORWARD_HEADERS_STRATEGY: "native"
+      SOCKBOWL_INTERNAL_PROXIES: "${SOCKBOWL_TRUSTED_PROXIES_REGEX}"
+      SOCKBOWL_TRUSTED_PROXIES_REGEX: "${SOCKBOWL_TRUSTED_PROXIES_REGEX}"
+      SOCKBOWL_REMOTE_IP_HEADER: "CF-Connecting-IP"
+
+  sockbowl-ng:
+    network_mode: !reset null
+    pull_policy: never
+    mem_limit: ${SOCKBOWL_NG_MEM_LIMIT:-64m}
+    networks:
+      internal: {}
+      edge:
+        aliases: ["${SOCKBOWL_EDGE_PREFIX:-sockbowl-prod}-ng"]
+    labels: !override
+      - "com.centurylinklabs.watchtower.enable=false"
+
+  # Never started in prod (D25: mage-watchtower already polls this host, and
+  # a second watchtower per `-p` project would collide with it despite the
+  # WATCHTOWER_SCOPE label). `!override` (not `!reset`) so the service still
+  # compiles with SOME profiles list; "never" matches no profile this deploy
+  # ever requests, which is what actually keeps it out of `--profile full`.
+  watchtower:
+    profiles: !override ["never"]

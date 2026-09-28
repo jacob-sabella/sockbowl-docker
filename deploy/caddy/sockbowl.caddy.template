@@ -1,0 +1,56 @@
+# sockbowl.jacobsabella.com Caddy site block (WP-D2, plans/m7-deploy.md §4.2).
+#
+# Rendered by scripts/deploy/render-caddy.sh into a concrete Caddyfile
+# fragment and spliced into the EXISTING aa-caddy Caddyfile on the VPS by
+# scripts/deploy/caddy-apply.sh (WP-D3) — this file itself is never copied to
+# the VPS or fed to `caddy validate`/`caddy reload` directly.
+#
+# Only the BEGIN..END region below is ever read by render-caddy.sh (this
+# header is documentation about the template, not part of what gets
+# rendered). Inside that region, four placeholders — SOCKBOWL_HOST,
+# TLS_DIRECTIVE, EDGE_PREFIX and CLIENT_IP_HEADER_UP, each written the usual
+# shell way — are substituted by render-caddy.sh (envsubst, restricted to
+# exactly these four names — see that script). Every other `{...}` in that
+# region is Caddy's OWN placeholder syntax (`{query}`,
+# `{http.request.header.CF-Connecting-IP}`) and is left alone by
+# render-caddy.sh on purpose: Caddy's env-var form is `{$NAME}`, not the
+# shell's `${NAME}`, so there is no collision, but the two look similar
+# enough that this file must never be hand-edited with a plain shell
+# templater that doesn't share that same restricted variable list and the
+# same BEGIN/END scoping.
+#
+# The BEGIN/END markers below are load-bearing: caddy-apply.sh deletes any
+# existing `sockbowl-m7` region by matching them exactly and replaces it with
+# a fresh render, so nothing above BEGIN or below END here ever reaches the
+# live Caddyfile — only what's between the markers does.
+# BEGIN sockbowl-m7 (managed by sockbowl-docker/scripts/deploy; do not edit by hand)
+${SOCKBOWL_HOST} {
+	${TLS_DIRECTIVE}
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	@kcadmin path /auth/admin /auth/admin/*
+	respond @kcadmin 404
+	@qactuator path /questions/actuator /questions/actuator/*
+	respond @qactuator 404
+	@auth path /auth /auth/*
+	handle @auth {
+		reverse_proxy ${EDGE_PREFIX}-keycloak:8080
+	}
+	@ws path /ws /ws/*
+	handle @ws {
+		rewrite * /sockbowl-game?{query}
+		reverse_proxy ${EDGE_PREFIX}-game:7000 {
+			stream_close_delay 5m
+		}
+	}
+	handle /api/* {
+		reverse_proxy ${EDGE_PREFIX}-game:7000 ${CLIENT_IP_HEADER_UP}
+	}
+	handle_path /questions/* {
+		reverse_proxy ${EDGE_PREFIX}-questions:7009 ${CLIENT_IP_HEADER_UP}
+	}
+	handle {
+		reverse_proxy ${EDGE_PREFIX}-ng:80
+	}
+}
+# END sockbowl-m7
