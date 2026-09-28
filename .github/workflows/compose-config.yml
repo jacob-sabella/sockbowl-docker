@@ -1,0 +1,114 @@
+name: Compose config, env-example, shellcheck
+
+# Fast, no-Docker-stack local checks (M6 CI-D): every compose overlay
+# combination this repo documents parses and resolves (`docker compose
+# config -q`, which only reads and merges the YAML, it never pulls or starts
+# anything); .env.example stays in sync with what compose and the overlays
+# actually consume and carries no live secret; every shell script parses
+# and passes shellcheck; and stomp-probe.mjs parses as valid JS. None of this
+# needs a runner with Docker networking, a token, or a push, so it runs on
+# every push and PR, not just workflow_dispatch.
+
+on:
+  push:
+    branches:
+      - main
+      - "goal/**"
+      - "release/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose-config:
+    name: docker compose config (every overlay combination)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Fake env file (config -q only needs the keys to be set, not real secrets)
+        run: cp .env.example .env.compose-config-check
+
+      - name: docker compose config -q -- prod default
+        run: docker compose --env-file .env.compose-config-check -f docker-compose.yml config -q
+
+      - name: docker compose config -q -- dev/e2e overlay
+        run: docker compose --env-file .env.compose-config-check -f docker-compose.yml -f docker-compose.dev.yml config -q
+
+      - name: docker compose config -q -- dev/e2e + limits-e2e overlay
+        run: |
+          docker compose --env-file .env.compose-config-check \
+            -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.limits-e2e.yml \
+            config -q
+
+      - name: docker compose config -q -- dev/e2e + limits-e2e + e2eauth-relax overlay
+        run: |
+          docker compose --env-file .env.compose-config-check \
+            -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.limits-e2e.yml -f docker-compose.e2eauth-relax.yml \
+            config -q
+
+      - name: docker compose config -q -- local-build overlay
+        run: docker compose --env-file .env.compose-config-check -f docker-compose.yml -f docker-compose.build.yml config -q
+
+      - name: docker compose config -q -- dev/e2e + local-build overlay
+        run: |
+          docker compose --env-file .env.compose-config-check \
+            -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.build.yml \
+            config -q
+
+      - name: docker compose config -q -- RBAC reconcile test fixture
+        run: docker compose -f scripts/test-rbac-reconcile.compose.yml config -q
+
+  check-env-example:
+    name: .env.example completeness and placeholder check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: scripts/check-env-example.sh
+        run: scripts/check-env-example.sh
+
+  lint-scripts:
+    name: shellcheck + syntax-check the scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Syntax-check every shell script
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS= read -r -d '' f; do
+            case "$(head -n1 "$f")" in
+              *bash*) bash -n "$f" || status=1 ;;
+              *) sh -n "$f" || status=1 ;;
+            esac
+          done < <(find scripts -name "*.sh" -print0)
+          exit "$status"
+
+      - name: node --check the Node scripts
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            node --check "$f"
+          done < <(find scripts \( -name "*.mjs" -o -name "*.js" \) -print0)
+
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: "./scripts"
+          severity: warning
+          # -x: follow sourced files (scripts/lib/*.sh, check-secrets.sh)
+          # instead of flagging SC1091 for each `source`/`.` that shellcheck
+          # can't statically resolve on its own.
+          additional_files: ""
+        env:
+          SHELLCHECK_OPTS: -x
