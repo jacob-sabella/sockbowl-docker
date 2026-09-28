@@ -287,6 +287,11 @@ services:
       SOCKBOWL_QUOTA_ENABLED:
       SOCKBOWL_FORWARD_HEADERS_STRATEGY:
       SOCKBOWL_TRUSTED_PROXIES_REGEX:
+      # Which header carries the real client IP once SOCKBOWL_FORWARD_HEADERS_STRATEGY=native
+      # is trusted (see .env.example's "Client IP" note, next to
+      # SOCKBOWL_TRUSTED_PROXIES_REGEX). Left unset, the app's own built-in
+      # default (x-forwarded-for) applies.
+      SOCKBOWL_REMOTE_IP_HEADER:
       SOCKBOWL_RL_SERVICE_CLIENTS:
       SOCKBOWL_RL_DEFAULT_CAPACITY:
       SOCKBOWL_RL_DEFAULT_REFILL_PERIOD:
@@ -303,6 +308,7 @@ services:
       SOCKBOWL_QUOTA_GUEST_HOSTED_SESSIONS:
       SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS:
       SOCKBOWL_QUOTA_AUTHOR_HOSTED_SESSIONS:
+      SOCKBOWL_QUOTA_MODERATOR_HOSTED_SESSIONS:
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
       # healthcheck below execs the bundled JRE directly against this class.
@@ -370,6 +376,8 @@ services:
       SOCKBOWL_QUOTA_ENABLED:
       SOCKBOWL_FORWARD_HEADERS_STRATEGY:
       SOCKBOWL_TRUSTED_PROXIES_REGEX:
+      # See the matching comment on sockbowl-game above.
+      SOCKBOWL_REMOTE_IP_HEADER:
       SOCKBOWL_RL_SERVICE_CLIENTS:
       SOCKBOWL_RL_DEFAULT_CAPACITY:
       SOCKBOWL_RL_DEFAULT_REFILL_PERIOD:
