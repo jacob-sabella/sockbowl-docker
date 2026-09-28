@@ -209,8 +209,20 @@ check_prereqs() {
 USE_SLOT=0
 SLOT_N=""
 LOCK_DIR=""
+SLOT_SCRATCH_BASE=""
 if [ -n "${SOCKBOWL_SLOT_SH:-}" ]; then
   USE_SLOT=1
+  # slot.sh's own `exec` subcommand only bind-mounts /home/jsabella/Projects
+  # and its own scratchpad directory into the exec container (see that
+  # tool's README); a `-w` workdir outside both is silently replaced with
+  # the scratchpad root instead of failing loudly (slot.sh: "cwd ... is not
+  # mounted ... using $SP"). A plain `mktemp -d` clones under /tmp, which is
+  # neither, so every probe below that runs `stack_exec -w "$TMP/..."` would
+  # silently execute from the scratchpad instead of the clone (e.g. `npm run
+  # smoke` failing with ENOENT on the scratchpad's own package.json instead
+  # of running the e2e suite at all). Clone under the scratchpad instead, so
+  # every exec'd workdir is one slot.sh actually mounts.
+  SLOT_SCRATCH_BASE="$(cd "$(dirname "$SOCKBOWL_SLOT_SH")/.." && pwd)"
 fi
 
 acquire() {
@@ -303,6 +315,12 @@ cleanup() {
   [ "$CREATED_QUESTIONS_TAG" -eq 1 ] && docker rmi sockbowl-questions:local >/dev/null 2>&1 || true
   [ "$CREATED_NG_TAG" -eq 1 ] && docker rmi sockbowl-ng:local >/dev/null 2>&1 || true
   if [ "$KEEP" -eq 0 ] && [ -n "$TMP" ]; then
+    # Leave the directory we're about to delete first: the teardown above
+    # needs cwd inside the clone (relative -f compose file paths), but
+    # deleting cwd out from under this shell makes every subshell forked
+    # afterwards (release's slot.sh, print_timings) print a spurious
+    # "shell-init: error retrieving current directory" to stderr.
+    cd "$REPO_ROOT" 2>/dev/null || cd / 2>/dev/null || true
     rm -rf "$TMP"
   else
     [ -n "$TMP" ] && echo "kept temp clone at $TMP (--keep)"
@@ -323,7 +341,11 @@ do_acquire() { acquire; }
 
 PROJECT=""
 do_clone() {
-  TMP="$(mktemp -d)"
+  if [ -n "$SLOT_SCRATCH_BASE" ]; then
+    TMP="$(mktemp -d "$SLOT_SCRATCH_BASE/cc1-clone.XXXXXX")"
+  else
+    TMP="$(mktemp -d)"
+  fi
   echo "cloning into $TMP"
   local repo ref
   for repo in docker game questions ng; do
