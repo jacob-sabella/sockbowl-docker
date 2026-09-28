@@ -43,7 +43,11 @@ jobs:
       - name: Syntax-check the scripts
         run: |
           bash -n scripts/smoke-auth.sh
+          bash -n scripts/lib/kafka-consumer-stability.sh
           node --check scripts/stomp-probe.mjs
+
+      - name: Unit-test the Kafka readiness fallback parsing (FIX-D1)
+        run: scripts/test-kafka-readiness.sh
 
       - name: Install stomp-probe.mjs runtime deps
         run: npm install

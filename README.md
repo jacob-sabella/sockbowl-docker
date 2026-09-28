@@ -188,6 +188,46 @@ wiring (throwaway project, config validation plus a live Redis/env-injection
 check); see its header comment for what it does and does not require from
 game/questions.
 
+### Testing token refresh (short-lived access tokens)
+
+`KC_ACCESS_TOKEN_LIFESPAN` (default `300` seconds) sets the access-token
+lifespan on the `sockbowl-game` and `sockbowl-e2e` Keycloak clients
+(`keycloak/clients/*.json`, applied by `scripts/load-rbac.sh`/the `rbac-init`
+job). It is **not** read by `sockbowl-game` or `sockbowl-questions` — a token's
+`exp` is entirely Keycloak's doing — so setting it only in a test runner's own
+environment (for example when invoking `npm run e2e:auth` in `sockbowl-ng`,
+whose `auth-refresh-logout.spec.ts` needs a short-lived token to actually
+observe a refresh) has **no effect on the stack**: the client still issues
+300s tokens, and the spec ends up waiting on a token that was never going to
+expire, so it can pass without ever exercising a refresh.
+
+To shorten the tokens the running stack actually issues, set
+`KC_ACCESS_TOKEN_LIFESPAN` when you bring the dev/e2e overlay up (or on a
+stack that's already up, re-run just `rbac-init`, which reconciles the
+client in place — no restart of Keycloak or the apps needed):
+
+```bash
+# Bringing the stack up fresh:
+KC_ACCESS_TOKEN_LIFESPAN=60 docker compose -p sockbowl-e2e \
+  -f docker-compose.yml -f docker-compose.dev.yml --profile full up -d
+
+# Or, against an already-running e2e stack:
+docker compose -p sockbowl-e2e -f docker-compose.yml -f docker-compose.dev.yml \
+  run --rm -e KC_ACCESS_TOKEN_LIFESPAN=60 rbac-init
+```
+
+Then run `npm run e2e:auth` (in `sockbowl-ng`) with the **same** value, so the
+spec's own wait matches what Keycloak is actually issuing:
+
+```bash
+KC_ACCESS_TOKEN_LIFESPAN=60 SOCKBOWL_APP=http://localhost npm run e2e:auth
+```
+
+Set it back to (or just leave off, to fall back to) `300` afterwards if you're
+going to keep using the same stack for anything else — a 60s access token is
+fine for this one spec, but makes every other manual/e2e session in that
+stack re-authenticate constantly.
+
 ### Production secrets
 
 Copying `.env.example` as-is and deploying with plain `docker compose --profile full
