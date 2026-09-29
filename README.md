@@ -107,14 +107,14 @@ MAVEN_REPO="${MAVEN_REPO:-$HOME/.m2/repository}"
 (cd ../sockbowl-questions && \
   GITHUB_REPOSITORY=jacob-sabella/sockbowl-questions \
   ./gradlew publishToMavenLocal bootBuildImage -Dmaven.repo.local="$MAVEN_REPO")
-docker tag "$(docker images -q ghcr.io/*/sockbowl-questions* | head -1)" sockbowl-questions:local
+docker tag "$(docker images -q "ghcr.io/*/sockbowl-questions*" | head -1)" sockbowl-questions:local
 
 # 2. Game: build its image against the models jar just published above
 #    (no GitHub Packages token needed).
 (cd ../sockbowl-game && \
   GITHUB_REPOSITORY=jacob-sabella/sockbowl-game \
   ./gradlew bootBuildImage -Dmaven.repo.local="$MAVEN_REPO" -PsockbowlUseMavenLocal=true)
-docker tag "$(docker images -q ghcr.io/*/sockbowl-game* | head -1)" sockbowl-game:local
+docker tag "$(docker images -q "ghcr.io/*/sockbowl-game*" | head -1)" sockbowl-game:local
 
 # 3. ng: production build. The Dockerfile copies a pre-built dist/, so this
 #    must run before the compose build below.
