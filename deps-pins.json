@@ -1,0 +1,62 @@
+[
+  {
+    "name": "action:EnricoMi/publish-unit-test-result-action",
+    "pin": "v2",
+    "reason": "Pinning this exactly (to v2.24.0) is CI-G's job (M6 plan §2 CI-G, \"Pin EnricoMi/publish-unit-test-result-action exactly\"), already done on CI-G's own branch (goal/m6-ci-g). It reads as \"v2\" here only until CI-G's branch merges into game's goal/m6-release; this entry should be dropped once that merge lands and the action check then sees v2.24.0 == latest.",
+    "decision": "M6 plan §2 CI-G"
+  },
+  {
+    "name": "image:nginx",
+    "pin": "1.30.5",
+    "reason": "1.30.x is nginx's current stable line; 1.31.x (and other odd minors) is the mainline/unstable line. This image is sockbowl-ng's Dockerfile base, checked here because check-latest-deps.sh covers all four repos.",
+    "decision": "M6 plan §2 DEP1 ignore list (\"nginx mainline odd minors\"); audit/m6/deps-docker.json"
+  },
+  {
+    "name": "image:neo4j",
+    "pin": "2026.09",
+    "reason": "CalVer release matched with the APOC/GDS plugin versions scripts/download-neo4j-plugins.sh pulls; a neo4j bump must land together with a plugin bump, not on its own. \"2026.09.0\" is neo4j's own explicit-patch alias for the exact same release as \"2026.09\" (not a newer one) — the registry lists both tags for one image digest.",
+    "decision": "M6 plan §2 S2 pins list (audit/m6/deps-docker.json)"
+  },
+  {
+    "name": "image:postgres",
+    "pin": "18",
+    "reason": "Major PostgreSQL versions require an explicit migration; the 18 -> 18.1 minor bump is safe but deliberately deferred until that migration work is scheduled.",
+    "decision": "M6 plan §2 DEP1 (audit/m6/deps-docker.json)"
+  },
+  {
+    "name": "npm:ng/root:typescript",
+    "pin": "6.0.3",
+    "reason": "Angular 22.2's peer range requires TypeScript <6.1; ng root stays on 6.0.x until Angular's peer range moves.",
+    "decision": "M6 plan §1/§2 S2 pins list (audit/m6/deps-ng.json)"
+  },
+  {
+    "name": "npm:ng/e2e:typescript",
+    "pin": "5.9.3",
+    "reason": "Will be bumped to match ng root's 6.0.x by DEP1-N (M6 W2 run B, after M5). Not yet at 6.0.x because that bump is pending M5, like the others below; still far below the unconstrained 'latest' (7.x) because ng root itself is capped by Angular's peer range.",
+    "decision": "M6 plan §2 DEP1 (audit/m6/deps-ng.json); M6 plan §2 Order (\"the ng items wait for M5\")"
+  },
+  {
+    "name": "npm:ng/root:typescript-eslint",
+    "pin": "8.70.1",
+    "reason": "ng root bump, pending M5: the M6 plan runs ng's DEP1 bumps only after M5 merges onto goal/m6-release. This run (W2 run A) covers game, questions and docker only.",
+    "decision": "M6 plan §2 Order (\"the ng items wait for M5\")"
+  },
+  {
+    "name": "npm:ng/e2e:@playwright/test",
+    "pin": "1.61.1",
+    "reason": "ng e2e bump, pending M5 (see typescript-eslint above): will move to match ng root's Playwright once DEP1-N runs in M6 W2 run B.",
+    "decision": "M6 plan §2 Order (\"the ng items wait for M5\")"
+  },
+  {
+    "name": "npm:ng/e2e:tsx",
+    "pin": "4.23.0",
+    "reason": "ng e2e bump, pending M5 (see typescript-eslint above).",
+    "decision": "M6 plan §2 Order (\"the ng items wait for M5\")"
+  },
+  {
+    "name": "npm:ng/e2e:ws",
+    "pin": "8.21.0",
+    "reason": "ng e2e bump, pending M5 (see typescript-eslint above).",
+    "decision": "M6 plan §2 Order (\"the ng items wait for M5\")"
+  }
+]
