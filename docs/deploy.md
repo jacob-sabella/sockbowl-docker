@@ -36,7 +36,7 @@ to touch any `mage-*`/`aa-*`/`*watchtower*` container — the one exception is
   directive (already configured on the box; nothing new to set up for TLS
   itself — DNS-01 needs no A record, so certs can be obtained before DNS
   exists).
-- **This repo, branch `goal/m7-deploy`** (or its eventual merge target),
+- **This repo, branch `main`**,
   clean and committed — `sync-bundle.sh` ships only `git archive`'s output,
   so anything uncommitted never reaches the VPS.
 
@@ -79,7 +79,7 @@ A record, so this can happen in parallel with everything else):
 Non-disruptive — the old stack keeps running throughout.
 
 ```
-scripts/deploy/sync-bundle.sh --ref goal/m7-deploy --remote-dir /home/ubuntu/sockbowl-prod
+scripts/deploy/sync-bundle.sh --ref main --remote-dir /home/ubuntu/sockbowl-prod
 ssh -i ~/.ssh/homelab ubuntu@15.204.11.205
   cd /home/ubuntu/sockbowl-prod
   scripts/deploy/make-env.sh                      # fills .env from .env.prod.example

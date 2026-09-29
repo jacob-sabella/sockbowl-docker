@@ -15,7 +15,7 @@
 # Usage:
 #   scripts/deploy/sync-bundle.sh [--dry-run] [--ref REF] [--remote-dir DIR]
 #
-# Defaults: --ref=goal/m7-deploy, --remote-dir=$REMOTE_DIR
+# Defaults: --ref=main, --remote-dir=$REMOTE_DIR
 # (/home/ubuntu/sockbowl-prod). Refuses --remote-dir sockbowl-docker (§4.5).
 #
 # Exit: 0 on success; 1 on a usage error, a bad ref, or a non-zero ssh/tar
@@ -28,7 +28,7 @@ DEPLOY_SCRIPT_NAME="sync-bundle"
 # shellcheck source=scripts/deploy/lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-ref="goal/m7-deploy"
+ref="main"
 remote_dir="$REMOTE_DIR"
 
 while [ $# -gt 0 ]; do
