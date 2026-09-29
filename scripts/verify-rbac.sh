@@ -30,7 +30,9 @@ export APP_PROTOCOL="${APP_PROTOCOL:-http}"
 export APP_HOST="${APP_HOST:-localhost}"
 export SOCKBOWL_GAME_PORT="${SOCKBOWL_GAME_PORT:-7000}"
 export KC_ACCESS_TOKEN_LIFESPAN="${KC_ACCESS_TOKEN_LIFESPAN:-300}"
-TEMPLATE_VARS='["APP_PROTOCOL","APP_HOST","SOCKBOWL_GAME_PORT","SOCKBOWL_AUTH_AUDIENCE","KC_ACCESS_TOKEN_LIFESPAN"]'
+export SOCKBOWL_PUBLIC_URL="${SOCKBOWL_PUBLIC_URL:-${APP_PROTOCOL}://${APP_HOST}}"
+SOCKBOWL_EXTRA_REDIRECT_ORIGINS="${SOCKBOWL_EXTRA_REDIRECT_ORIGINS:-}"
+TEMPLATE_VARS='["SOCKBOWL_PUBLIC_URL","APP_PROTOCOL","APP_HOST","SOCKBOWL_GAME_PORT","SOCKBOWL_AUTH_AUDIENCE","KC_ACCESS_TOKEN_LIFESPAN"]'
 
 API="${KEYCLOAK_URL}/admin/realms/${KEYCLOAK_REALM}"
 DRIFT=0
@@ -72,6 +74,32 @@ get() {
 render() {
   jq --argjson vars "$TEMPLATE_VARS" 'walk(if type == "string"
     then reduce $vars[] as $v (.; split("${" + $v + "}") | join($ENV[$v] // "")) else . end)' "$1"
+}
+
+# The expected redirect set of a client: the template's own entries plus, for
+# a client that has redirect URIs at all, "<origin>/*" (redirect and
+# post-logout) and "<origin>" (web origin) for each space-separated origin in
+# SOCKBOWL_EXTRA_REDIRECT_ORIGINS. Printed as {"redirectUris":[..],
+# "webOrigins":[..],"postLogout":[..]|null}, every list sorted and unique.
+# shellcheck disable=SC2016 # jq program, not shell
+expected_uri_sets() {
+  local -a extras=()
+  read -r -a extras <<<"$SOCKBOWL_EXTRA_REDIRECT_ORIGINS" || true
+  jq -c --argjson extra "$(jq -cn '$ARGS.positional' --args "${extras[@]}")" '
+    ((.redirectUris // []) | length > 0) as $spa
+    | (if $spa then $extra else [] end) as $x
+    | {redirectUris: ((.redirectUris // []) + ($x | map(. + "/*")) | unique),
+       webOrigins: ((.webOrigins // []) + $x | unique),
+       postLogout: (((.attributes // {})["post.logout.redirect.uris"]) as $p
+                    | if $p == null then null
+                      else (if $p == "" then [] else ($p | split("##")) end) + ($x | map(. + "/*")) | unique end)}'
+}
+
+# The live client's redirect sets, in the same shape.
+# shellcheck disable=SC2016 # jq program, not shell
+live_uri_sets() {
+  jq -c '{redirectUris: ((.redirectUris // []) | unique), webOrigins: ((.webOrigins // []) | unique),
+          postLogout: (((.attributes // {})["post.logout.redirect.uris"] // "") | if . == "" then [] else split("##") end | unique)}'
 }
 
 # First argument: JSON of the expected sorted name list; second: actual.
@@ -147,8 +175,22 @@ check_client() {
 
   desired="$(render "$file")"
   current="$(get "${API}/clients/${uuid}")"
-  bad="$(jq -c --argjson cur "$current" "${JQ_CONTAINS}"'del(.protocolMappers) | mismatches($cur)' <<<"$desired")"
+  bad="$(jq -c --argjson cur "$current" "${JQ_CONTAINS}"'del(.protocolMappers, .redirectUris, .webOrigins)
+    | if .attributes then .attributes |= del(.["post.logout.redirect.uris"]) else . end | mismatches($cur)' <<<"$desired")"
   if [ "$bad" = "[]" ]; then ok "client ${cid} settings"; else drift "client ${cid} settings differ: ${bad}"; fi
+
+  # Redirect URIs, web origins and post-logout URIs: exact sets, so a stale
+  # extra entry (e.g. an old host's URI) is drift.
+  local want_uris have_uris field
+  want_uris="$(expected_uri_sets <<<"$desired")"
+  have_uris="$(live_uri_sets <<<"$current")"
+  for field in redirectUris webOrigins postLogout; do
+    local w h
+    w="$(jq -c --arg f "$field" '.[$f]' <<<"$want_uris")"
+    [ "$w" != "null" ] || continue
+    h="$(jq -c --arg f "$field" '.[$f]' <<<"$have_uris")"
+    if [ "$w" = "$h" ]; then ok "client ${cid} ${field}"; else drift "client ${cid} ${field}: want ${w} have ${h}"; fi
+  done
 
   local mappers want_names have_names name
   mappers="$(get "${API}/clients/${uuid}/protocol-mappers/models")"

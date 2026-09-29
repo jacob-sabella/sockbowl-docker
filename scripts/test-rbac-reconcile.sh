@@ -21,6 +21,11 @@
 #   9. a pre-M2 realm (SPA client with ROPC and no audience, backend client
 #      created by the old add-only loader, demo users on role "user") is
 #      upgraded in place and verifies clean
+#  10. M7 exact redirect sets: a stale https://sockbowl.com URI on the SPA
+#      client's redirectUris, webOrigins and post-logout URIs is detected by
+#      verify and removed by the loader; the prod shape (SOCKBOWL_PUBLIC_URL
+#      only, no extra origins) leaves exactly one entry each; malformed origins
+#      are refused before anything is applied
 # plus check-secrets unit cases (run under the host sh and alpine's ash).
 #
 # Usage: scripts/test-rbac-reconcile.sh
@@ -81,6 +86,8 @@ loader_env() {
     "SOCKBOWL_GAME_BACKEND_SECRET=${SECRET:-$SECRET1}" "SOCKBOWL_E2E=${E2E:-true}" \
     "CREATE_DEMO_ACCOUNTS=${DEMO:-true}" "DEMO_PASSWORD=${DEMO_PW}" \
     "APP_PROTOCOL=http" "APP_HOST=localhost" "SOCKBOWL_GAME_PORT=7000" "KC_ACCESS_TOKEN_LIFESPAN=300" \
+    "SOCKBOWL_PUBLIC_URL=${PUBLIC:-http://localhost}" \
+    "SOCKBOWL_EXTRA_REDIRECT_ORIGINS=${EXTRAS-http://localhost:4200 http://localhost:7000}" \
     "RBAC_CLIENTS_DIR=${RBAC_CLIENTS_DIR:-}"
 }
 
@@ -247,7 +254,9 @@ check "player1 (admin) has packet:manage-any and admin:access" jqe '(.realm_acce
 check "sockbowl-game refuses the password grant (unauthorized_client)" jqe '.error == "unauthorized_client"' < <(password_token sockbowl-game player2)
 game_rep="$(admin_get "/clients/$(client_uuid sockbowl-game)")"
 check "sockbowl-game requires PKCE S256" jqe '.attributes["pkce.code.challenge.method"] == "S256"' <<<"$game_rep"
-check "sockbowl-game has post-logout redirect URIs" jqe '.attributes["post.logout.redirect.uris"] == "http://localhost/*##http://localhost:4200/*"' <<<"$game_rep"
+check "sockbowl-game has the dev post-logout redirect URI set" jqe '(.attributes["post.logout.redirect.uris"] | split("##") | sort) == ["http://localhost/*","http://localhost:4200/*","http://localhost:7000/*"]' <<<"$game_rep"
+check "sockbowl-game has the dev redirectUris set" jqe '(.redirectUris | sort) == ["http://localhost/*","http://localhost:4200/*","http://localhost:7000/*"]' <<<"$game_rep"
+check "sockbowl-game has the dev webOrigins set" jqe '(.webOrigins | sort) == ["http://localhost","http://localhost:4200","http://localhost:7000"]' <<<"$game_rep"
 realm_rep="$(admin_get "")"
 check "realm rotates refresh tokens" jqe '.revokeRefreshToken == true and .refreshTokenMaxReuse == 0 and .sslRequired == "external"' <<<"$realm_rep"
 
@@ -300,6 +309,48 @@ check "legacy: player2 moved from 'user' to 'player'" grep -q 'demo user player2
 check "verify-rbac passes on the upgraded realm" with KEYCLOAK_REALM_OVERRIDE=legacy run_verify
 check "second load on the upgraded realm is a no-op" with KEYCLOAK_REALM_OVERRIDE=legacy run_loader
 check "no changes reported" test "$(changes_reported)" -eq 0
+
+section "10. M7: redirect URIs, web origins and post-logout URIs reconcile as exact sets"
+game_uuid="$(client_uuid sockbowl-game)"
+game_rep="$(admin_get "/clients/${game_uuid}")"
+stale_rep="$(jq -c '.redirectUris += ["https://sockbowl.com/*"] | .webOrigins += ["https://sockbowl.com"]
+  | .attributes["post.logout.redirect.uris"] += "##https://sockbowl.com/*"' <<<"$game_rep")"
+check "inject: stale https://sockbowl.com entries on sockbowl-game" test "$(admin PUT "/clients/${game_uuid}" "$stale_rep")" = 204
+check "the stale entries are really there" jqe '[.redirectUris[], .webOrigins[], (.attributes["post.logout.redirect.uris"] | split("##"))[]] | map(select(test("sockbowl\\.com"))) | length == 3' < <(admin_get "/clients/${game_uuid}")
+rc=0; run_verify || rc=$?
+check "verify-rbac detects the stale entries (exit 1)" test "$rc" -eq 1
+for f in redirectUris webOrigins postLogout; do
+  check "verify reports: client sockbowl-game ${f}" grep -qE "DRIFT: client sockbowl-game ${f}:" "$OUT"
+done
+check "loader succeeds" run_loader
+check "loader logs the removal [redirectUris-]" grep -qE 'client updated: sockbowl-game .*"redirectUris-"' "$OUT"
+check "loader logs the removal [webOrigins-]" grep -qE 'client updated: sockbowl-game .*"webOrigins-"' "$OUT"
+check "loader logs the removal [post.logout.redirect.uris-]" grep -qE 'client updated: sockbowl-game .*"post\.logout\.redirect\.uris-"' "$OUT"
+game_rep="$(admin_get "/clients/${game_uuid}")"
+check "no sockbowl.com entry is left" jqe '[.redirectUris[], .webOrigins[], (.attributes["post.logout.redirect.uris"] | split("##"))[]] | map(select(test("sockbowl\\.com"))) | length == 0' <<<"$game_rep"
+check "redirectUris is exactly the dev set" jqe '(.redirectUris | sort) == ["http://localhost/*","http://localhost:4200/*","http://localhost:7000/*"]' <<<"$game_rep"
+check "verify-rbac passes after the reconcile" run_verify
+check "second load is a no-op" run_loader
+check "no changes reported" test "$(changes_reported)" -eq 0
+
+prod_env=(PUBLIC=https://sockbowl.jacobsabella.com EXTRAS=)
+check "prod shape: loader with SOCKBOWL_PUBLIC_URL only succeeds" with "${prod_env[@]}" run_loader
+check "prod shape: dev origins reported removed" grep -qE 'client updated: sockbowl-game .*"redirectUris-".*"redirectUris\+"' "$OUT"
+game_rep="$(admin_get "/clients/${game_uuid}")"
+check "prod shape: redirectUris is exactly [public/*]" jqe '.redirectUris == ["https://sockbowl.jacobsabella.com/*"]' <<<"$game_rep"
+check "prod shape: webOrigins is exactly [public]" jqe '.webOrigins == ["https://sockbowl.jacobsabella.com"]' <<<"$game_rep"
+check "prod shape: post-logout is exactly public/*" jqe '.attributes["post.logout.redirect.uris"] == "https://sockbowl.jacobsabella.com/*"' <<<"$game_rep"
+check "prod shape: verify-rbac passes with the same env" with "${prod_env[@]}" run_verify
+rc=0; run_verify >/dev/null || rc=$?
+check "prod shape: verify-rbac with the dev env flags the missing dev origins (exit 1)" test "$rc" -eq 1
+
+for bad in "PUBLIC=https://sockbowl.jacobsabella.com/" "PUBLIC=https://sockbowl.jacobsabella.com/app" "EXTRAS=*" "EXTRAS=http://localhost:4200/*" "EXTRAS=javascript:alert(1)"; do
+  rc=0; with "$bad" run_loader >/dev/null || rc=$?
+  check "malformed origin refused before any change: ${bad}" test "$rc" -ne 0 -a "$(changes_reported)" -eq 0
+done
+check "the refusal names the variable" grep -q 'SOCKBOWL_EXTRA_REDIRECT_ORIGINS entry must be scheme://host' "$OUT"
+check "restore the dev shape" run_loader
+check "verify-rbac passes on the restored dev shape" run_verify
 
 echo
 echo "test-rbac-reconcile: ${PASSED} passed, ${FAILED} failed"

@@ -23,9 +23,18 @@
 #     only because the game fetched the packet from questions with its own
 #     service token).
 #
-# Usage:
+# Usage (port mode, dev/e2e overlay — unchanged from before M7):
 #   SOCKBOWL_GAME_BACKEND_SECRET=<the running stack's value> \
 #   NEO4J_PASSWORD=<the running stack's value> scripts/smoke-auth.sh
+#
+# Usage (path mode, M7 WP-D3, plans/m7-deploy.md §7 gate 8.2 — a single-host
+# deploy behind Caddy, e.g. WP-V1's local rehearsal or the real
+# https://sockbowl.jacobsabella.com):
+#   SOCKBOWL_PATH_MODE=1 SOCKBOWL_PUBLIC_URL=https://sockbowl.jacobsabella.com \
+#   SMOKE_RESOLVE=sockbowl.jacobsabella.com:443:127.0.0.1 \
+#   SMOKE_CACERT=<scratch>/sbm7v-ca.crt \
+#   SOCKBOWL_GAME_BACKEND_SECRET=... NEO4J_PASSWORD=... \
+#   NEO4J_CONTAINER=<project>-neo4j-1 scripts/smoke-auth.sh
 #
 # Env (all match .env.example / docker-compose.yml so the defaults work
 # against the standard e2e overlay unchanged):
@@ -41,6 +50,40 @@
 #     secret above: needed to seed a throwaway BankTossup/BankBonus fixture
 #     over Neo4j's HTTP query endpoint, since docker-compose.yml wires no
 #     qbreader-dump loader and a fresh stack's bank is otherwise empty).
+#
+# Path-mode-only env (M7 WP-D3, §7):
+#   SOCKBOWL_PATH_MODE=1 switches every URL (Keycloak/game/questions/WS) from
+#     host:port addressing to SOCKBOWL_PUBLIC_URL + the M7 path contract
+#     (/auth, /api (unprefixed at Caddy), /questions, /ws) — the same
+#     contract WP-N1 wired into sockbowl-ng and WP-D2 wired into the Caddy
+#     template. SOCKBOWL_PUBLIC_URL is then required.
+#   SMOKE_RESOLVE=host:port:ip — curl's `--resolve` triple (§7 step 7),
+#     applied to every curl call this script makes, so it can hit a
+#     throwaway local rehearsal's real public hostname without an
+#     /etc/hosts edit. Forwarded to scripts/stomp-probe.mjs as
+#     SOCKBOWL_RESOLVE (same value, same format).
+#   SMOKE_CACERT=path — curl's `--cacert` (a local rehearsal's Caddy-internal
+#     CA, §7 step 7). If NODE_EXTRA_CA_CERTS is not already set in the
+#     caller's environment, it is set to this same path before invoking
+#     stomp-probe.mjs (Node's TLS stack reads it natively; no code needed
+#     there for the CA half, only for --resolve/SOCKBOWL_RESOLVE).
+#   NEO4J_CONTAINER (default ${COMPOSE_PROJECT_NAME:-sockbowl-prod}-neo4j-1):
+#     in path mode, bank-fixture seeding/cleanup goes through
+#     `docker compose exec`-style `docker exec ... cypher-shell`, never
+#     Neo4j's HTTP endpoint on :7474 — the prod bridge network publishes no
+#     such port (§4.1), so the old HTTP-based seeding used by port mode
+#     would simply fail to connect there.
+#   Two of the port-mode REST rows below have no equivalent through Caddy in
+#   path mode, by the M7 routing contract's own design (§4.2's site block has
+#   no handler for a bare /actuator/health or /login — only /api/*, /ws,
+#   /auth/*, and /questions/* reach a backend; everything else is ng's SPA
+#   catch-all): game's public /actuator/health, and the removed /login flow.
+#   Both are SKIPped in path mode with an explicit reason rather than
+#   silently passing for the wrong reason (ng's SPA answers 200 for
+#   anything) or failing on an unreachable-by-design path; questions'
+#   `/questions/actuator/health` instead asserts the *opposite* of port
+#   mode's expectation (404, not 200 — this is D2's own `@qactuator` block
+#   doing its job, also checked by scripts/deploy/verify.sh's curl set).
 #
 # Exit: 0 if every row passed. Prints "PASS:"/"FAIL:"/"SKIP:" lines (this
 # repo's convention; see scripts/test-rbac-reconcile.sh) plus a final table
@@ -67,12 +110,45 @@ NEO4J_USER="${NEO4J_USER:-neo4j}"
 DEMO_PASSWORD="${DEMO_PASSWORD:-demo123}"
 : "${SOCKBOWL_GAME_BACKEND_SECRET:?Set SOCKBOWL_GAME_BACKEND_SECRET to the running stacks value (rbac-init rotates it on every load-rbac.sh run; there is no safe default)}"
 
+# M7 WP-D3 (§7 gate 8.2): path mode.
+SOCKBOWL_PATH_MODE="${SOCKBOWL_PATH_MODE:-0}"
+SOCKBOWL_PUBLIC_URL="${SOCKBOWL_PUBLIC_URL:-}"
+SMOKE_RESOLVE="${SMOKE_RESOLVE:-}"
+SMOKE_CACERT="${SMOKE_CACERT:-}"
+NEO4J_CONTAINER="${NEO4J_CONTAINER:-${COMPOSE_PROJECT_NAME:-sockbowl-prod}-neo4j-1}"
+
 REALM="sockbowl"
-KC_URL="${APP_PROTOCOL}://${APP_HOST}:${KEYCLOAK_PORT}"
+if [ "$SOCKBOWL_PATH_MODE" = "1" ]; then
+  : "${SOCKBOWL_PUBLIC_URL:?SOCKBOWL_PATH_MODE=1 requires SOCKBOWL_PUBLIC_URL (e.g. https://sockbowl.jacobsabella.com)}"
+  KC_URL="${SOCKBOWL_PUBLIC_URL}/auth"
+  GAME_URL="${SOCKBOWL_PUBLIC_URL}"
+  QUESTIONS_URL="${SOCKBOWL_PUBLIC_URL}/questions"
+  case "$SOCKBOWL_PUBLIC_URL" in
+    https://*) WS_URL="wss://${SOCKBOWL_PUBLIC_URL#https://}/ws" ;;
+    http://*) WS_URL="ws://${SOCKBOWL_PUBLIC_URL#http://}/ws" ;;
+    *) echo "FATAL: SOCKBOWL_PUBLIC_URL must start with http:// or https://, got '$SOCKBOWL_PUBLIC_URL'" >&2; exit 2 ;;
+  esac
+else
+  KC_URL="${APP_PROTOCOL}://${APP_HOST}:${KEYCLOAK_PORT}"
+  GAME_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}"
+  QUESTIONS_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}"
+  WS_URL="${WS_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}/sockbowl-game"
+fi
 KEYCLOAK_ISSUER_URI="${KEYCLOAK_ISSUER_URI:-${KC_URL}/realms/${REALM}}"
-GAME_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}"
-QUESTIONS_URL="${APP_PROTOCOL}://${APP_HOST}:${SOCKBOWL_QUESTIONS_PORT}"
 NEO4J_URL="${APP_PROTOCOL}://${APP_HOST}:${NEO4J_HTTP_PORT}"
+
+# --resolve/--cacert (§7 step 7), applied to every curl call below via
+# CURL_EXTRA_ARGS — a no-op empty array in port mode or when neither is set.
+CURL_EXTRA_ARGS=()
+if [ -n "$SMOKE_RESOLVE" ]; then CURL_EXTRA_ARGS+=(--resolve "$SMOKE_RESOLVE"); fi
+if [ -n "$SMOKE_CACERT" ]; then CURL_EXTRA_ARGS+=(--cacert "$SMOKE_CACERT"); fi
+# Same rule, forwarded to stomp-probe.mjs's Node process (SOCKBOWL_RESOLVE,
+# the same name and host:port:ip format sockbowl-ng's e2e harness uses,
+# WP-N1). NODE_EXTRA_CA_CERTS needs no translation: Node's TLS stack reads it
+# natively, so it only needs to be *set*, from SMOKE_CACERT, if the caller
+# hasn't already set it directly.
+if [ -n "$SMOKE_RESOLVE" ]; then export SOCKBOWL_RESOLVE="$SMOKE_RESOLVE"; fi
+if [ -n "$SMOKE_CACERT" ] && [ -z "${NODE_EXTRA_CA_CERTS:-}" ]; then export NODE_EXTRA_CA_CERTS="$SMOKE_CACERT"; fi
 
 # Game requires every GameSettings field verbatim (CreateGameRequest is bound
 # via its all-args constructor, so Jackson passes JSON `null` for any omitted
@@ -89,23 +165,44 @@ GAME_BODY_SINGLE='{"gameSettings":{"gameMode":"SINGLE_PLAYER","bonusesEnabled":f
 # Neo4j's HTTP query endpoint (no cypher-shell/container-name dependency),
 # and remove it again in cleanup().
 BANK_TAG="smoke-$$"
+# M7 WP-D3 (§7/path mode): the prod bridge network publishes no Neo4j HTTP
+# port (§4.1 "no ports: anywhere"), so port mode's tx/commit endpoint is
+# simply unreachable there. In path mode, seed/cleanup instead run the same
+# two statements through `docker exec $NEO4J_CONTAINER cypher-shell` (bolt
+# over localhost inside that container, exactly like scripts/init-neo4j.sh's
+# own pattern) rather than curl.
 seed_bank_fixture() {
   local stmt
   stmt="UNWIND range(1,5) AS i CREATE (:BankTossup {remoteId: '${BANK_TAG}-t'+i, question: 'Tossup '+i+'?', answer: 'Answer '+i, category: 'Science', subcategory: 'Science', difficulty: 5, year: 2020, standard: true}) CREATE (b:BankBonus {remoteId: '${BANK_TAG}-b'+i, preamble: 'Bonus preamble '+i, category: 'Science', subcategory: 'Science', difficulty: 5, year: 2020, standard: true}) CREATE (b)-[:HAS_PART {order:0}]->(:BankBonusPart {question:'Part1?',answer:'PartA1'}) CREATE (b)-[:HAS_PART {order:1}]->(:BankBonusPart {question:'Part2?',answer:'PartA2'}) CREATE (b)-[:HAS_PART {order:2}]->(:BankBonusPart {question:'Part3?',answer:'PartA3'})"
-  curl -sS -u "${NEO4J_USER}:${NEO4J_PASSWORD}" -X POST "$NEO4J_URL/db/neo4j/tx/commit" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg s "$stmt" '{statements:[{statement:$s}]}')" >/dev/null
+  if [ "$SOCKBOWL_PATH_MODE" = "1" ]; then
+    docker exec -i "$NEO4J_CONTAINER" cypher-shell -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" --format plain "$stmt" >/dev/null
+  else
+    curl -sS -u "${NEO4J_USER}:${NEO4J_PASSWORD}" -X POST "$NEO4J_URL/db/neo4j/tx/commit" \
+      -H 'Content-Type: application/json' \
+      -d "$(jq -n --arg s "$stmt" '{statements:[{statement:$s}]}')" >/dev/null
+  fi
 }
 cleanup_bank_fixture() {
   local stmt
   stmt="MATCH (n) WHERE (n:BankTossup OR n:BankBonus) AND n.remoteId STARTS WITH '${BANK_TAG}-' OPTIONAL MATCH (n)-[:HAS_PART]->(bp:BankBonusPart) DETACH DELETE n, bp"
-  curl -sS -u "${NEO4J_USER}:${NEO4J_PASSWORD}" -X POST "$NEO4J_URL/db/neo4j/tx/commit" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg s "$stmt" '{statements:[{statement:$s}]}')" >/dev/null || true
+  if [ "$SOCKBOWL_PATH_MODE" = "1" ]; then
+    docker exec -i "$NEO4J_CONTAINER" cypher-shell -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" --format plain "$stmt" >/dev/null 2>&1 || true
+  else
+    curl -sS -u "${NEO4J_USER}:${NEO4J_PASSWORD}" -X POST "$NEO4J_URL/db/neo4j/tx/commit" \
+      -H 'Content-Type: application/json' \
+      -d "$(jq -n --arg s "$stmt" '{statements:[{statement:$s}]}')" >/dev/null || true
+  fi
 }
 trap cleanup_bank_fixture EXIT
 seed_bank_fixture
-WS_URL="${WS_PROTOCOL}://${APP_HOST}:${SOCKBOWL_GAME_PORT}/sockbowl-game"
+# NOTE: WS_URL is already set above (path mode: wss://.../ws off
+# SOCKBOWL_PUBLIC_URL; port mode: ws://$APP_HOST:$SOCKBOWL_GAME_PORT/sockbowl-game)
+# — this used to unconditionally reassign it back to the port-mode form here,
+# silently discarding the path-mode value every single run (stomp-probe.mjs
+# would then dial ws://localhost:7000/sockbowl-game regardless of
+# SOCKBOWL_PATH_MODE, surfacing as ECONNREFUSED/WS_ERROR on every STOMP
+# scenario in path mode, never a real STOMP-level failure). Do not reinstate
+# this line.
 
 PASSED=0
 FAILED=0
@@ -131,7 +228,7 @@ expect_eq() {
 # req <method> <url> [bearer] [json-body] — sets $CODE and $BODY.
 req() {
   local method="$1" url="$2" bearer="${3:-}" data="${4:-}"
-  local -a args=(-sS -X "$method" "$url" -H 'Content-Type: application/json')
+  local -a args=("${CURL_EXTRA_ARGS[@]}" -sS -X "$method" "$url" -H 'Content-Type: application/json')
   [ -n "$bearer" ] && args+=(-H "Authorization: Bearer $bearer")
   [ -n "$data" ] && args+=(--data "$data")
   local out
@@ -150,14 +247,14 @@ gql() {
 
 # token_for <username> -> prints an access token (password grant, sockbowl-e2e).
 token_for() {
-  curl -sS -X POST "$KC_URL/realms/$REALM/protocol/openid-connect/token" \
+  curl "${CURL_EXTRA_ARGS[@]}" -sS -X POST "$KC_URL/realms/$REALM/protocol/openid-connect/token" \
     -d grant_type=password -d client_id=sockbowl-e2e \
     -d "username=$1" -d "password=$DEMO_PASSWORD" | jq -r '.access_token // empty'
 }
 
 # service_token -> prints an access token (client_credentials, sockbowl-game-backend).
 service_token() {
-  curl -sS -X POST "$KC_URL/realms/$REALM/protocol/openid-connect/token" \
+  curl "${CURL_EXTRA_ARGS[@]}" -sS -X POST "$KC_URL/realms/$REALM/protocol/openid-connect/token" \
     -d grant_type=client_credentials -d client_id=sockbowl-game-backend \
     -d "client_secret=$SOCKBOWL_GAME_BACKEND_SECRET" | jq -r '.access_token // empty'
 }
@@ -206,8 +303,21 @@ wait_for_game_kafka_ready() {
   local deadline=$((SECONDS + GAME_READINESS_TIMEOUT_SECONDS))
   local readiness_url="$GAME_URL/actuator/health/readiness"
 
-  req GET "$readiness_url" ""
-  if [ "$CODE" = "200" ] || [ "$CODE" = "503" ]; then
+  if [ "$SOCKBOWL_PATH_MODE" = "1" ]; then
+    # In path mode GAME_URL is the bare public host (§4.2's Caddy contract
+    # only proxies /api/*, /ws, /auth/*, /questions/* to a backend; there is
+    # no bare /actuator/* route), so this GET would hit ng's SPA catch-all
+    # instead — a 200 of HTML, not the readiness group's JSON, which the
+    # `status == UP` poll below would then spin on for the full timeout and
+    # misreport as FAIL instead of skipping past an environment quirk (found
+    # live: it did exactly that, a false FAIL every run in path mode). Skip
+    # straight to the Kafka-consumer-group fallback, which doesn't go through
+    # Caddy at all.
+    echo "path mode: $readiness_url is not reachable behind Caddy (no bare /actuator/* route); skipping straight to the Kafka consumer-group fallback"
+  else
+    req GET "$readiness_url" ""
+  fi
+  if [ "$SOCKBOWL_PATH_MODE" != "1" ] && { [ "$CODE" = "200" ] || [ "$CODE" = "503" ]; }; then
     echo "game exposes $readiness_url (FIX-G2's readiness group); polling it for status=UP"
     while [ "$SECONDS" -lt "$deadline" ]; do
       req GET "$readiness_url" ""
@@ -352,8 +462,12 @@ expect_status "deny-by-default: an unmapped path, authenticated -> 403 (never a 
 # (confirmed live: an unmapped path never reaches a 404 dispatch anonymously).
 req GET "$GAME_URL/api/v1/test" ""
 expect_status "removed route /api/v1/test -> 401, deny-by-default (TestController deleted)" 401 "$CODE"
-req GET "$GAME_URL/login" ""
-expect_status "removed server-side login flow /login -> 401, never a redirect" 401 "$CODE"
+if [ "$SOCKBOWL_PATH_MODE" = "1" ]; then
+  skip "removed server-side login flow /login: no /login handler in the M7 Caddy contract (§4.2 has no bare-path route; ng's SPA catch-all would answer 200 for the wrong reason)"
+else
+  req GET "$GAME_URL/login" ""
+  expect_status "removed server-side login flow /login -> 401, never a redirect" 401 "$CODE"
+fi
 
 echo
 echo "== REST matrix: questions (plan section 4.1) =="
@@ -378,15 +492,25 @@ expect_status "POST /api/qbreader/import-random: player -> 200, an EPHEMERAL pac
 req POST "$QUESTIONS_URL/api/qbreader/import-random" "$TOKEN_AUTHOR" '{"tossupCount":3,"bonusCount":3}'
 expect_status "POST /api/qbreader/import-random: author -> 200, an owned DRAFT packet" 200 "$CODE"
 
-req GET "$QUESTIONS_URL/api/packets/generate?topic=Science" ""
-expect_status "GET /api/packets/generate: anonymous -> 401" 401 "$CODE"
-req GET "$QUESTIONS_URL/api/packets/generate?topic=Science" "$TOKEN_PLAYER"
-expect_status "GET /api/packets/generate: player -> 403" 403 "$CODE"
+# M4 (D11) made generation POST-only with a JSON body (GeneratePacketRequest);
+# the old GET form now answers 405 before authorization is even consulted.
+req POST "$QUESTIONS_URL/api/packets/generate" "" '{"topic":"Science","questionCount":1,"generateBonuses":false}'
+expect_status "POST /api/packets/generate: anonymous -> 401" 401 "$CODE"
+req POST "$QUESTIONS_URL/api/packets/generate" "$TOKEN_PLAYER" '{"topic":"Science","questionCount":1,"generateBonuses":false}'
+expect_status "POST /api/packets/generate: player -> 403" 403 "$CODE"
 
-req GET "$GAME_URL/actuator/health" ""
-expect_status "GET game /actuator/health: public -> 200" 200 "$CODE"
-req GET "$QUESTIONS_URL/actuator/health" ""
-expect_status "GET questions /actuator/health: public -> 200" 200 "$CODE"
+if [ "$SOCKBOWL_PATH_MODE" = "1" ]; then
+  skip "GET game /actuator/health: no bare /actuator/health route in the M7 Caddy contract (only /api/*, /ws, /auth/*, /questions/* reach a backend; ng's SPA catch-all would answer 200 for the wrong reason)"
+  # D2's @qactuator block (§4.2) exists specifically to make this 404, the
+  # opposite of port mode's 200 — this is that gate's own smoke check.
+  req GET "$QUESTIONS_URL/actuator/health" ""
+  expect_status "GET questions /actuator/health: never public behind Caddy (D2 @qactuator) -> 404" 404 "$CODE"
+else
+  req GET "$GAME_URL/actuator/health" ""
+  expect_status "GET game /actuator/health: public -> 200" 200 "$CODE"
+  req GET "$QUESTIONS_URL/actuator/health" ""
+  expect_status "GET questions /actuator/health: public -> 200" 200 "$CODE"
+fi
 
 echo
 echo "== GraphQL matrix (plan section 4.1: classification, draft/answer redaction) =="
@@ -440,8 +564,18 @@ req POST "$GAME_URL/api/v1/session/join-game-session-by-code" "" "$(jq -n --arg 
 GUEST_PLAYER_ID="$(jq -r '.playerSessionId' <<<"$BODY")"
 GUEST_SECRET="$(jq -r '.playerSecret' <<<"$BODY")"
 
-# A second, unrelated guest game (the cross-game SUBSCRIBE target).
-req POST "$GAME_URL/api/v1/session/create-new-game-session" "" "$GAME_BODY_CLASSIC"
+# A second, unrelated game (the cross-game SUBSCRIBE target). Hosted by
+# player2 (TOKEN_PLAYER), not another guest create: the REST matrix above
+# already spent one of the guest tier's default 2 hosted-sessions quota (D10)
+# on its own "guest is allowed" check, and the guest-joined seat above spends
+# the second, so a third anonymous create from this same IP would always hit
+# 429 here -- stomp-probe.mjs only ever uses this id as an arbitrary distinct
+# game id for authSeat's cross-game SUBSCRIBE attempt (see its otherGameSessionId
+# doc comment), never joins or hosts through it, so which tier owns it is
+# immaterial to what's being probed. player2 hasn't hosted anything yet at
+# this point in the script and the player tier's own quota (default 3) is
+# untouched by the guest checks above.
+req POST "$GAME_URL/api/v1/session/create-new-game-session" "$TOKEN_PLAYER" "$GAME_BODY_CLASSIC"
 OTHER_GAME_ID="$(jq -r '.id' <<<"$BODY")"
 
 # testuser's own proctorless (SINGLE_PLAYER) game: game owner == testuser, so

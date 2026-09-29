@@ -48,6 +48,56 @@ if (!CONFIG_PATH) {
   process.exit(2);
 }
 
+// SOCKBOWL_RESOLVE=host:port:ip — the same curl-style --resolve triple
+// scripts/smoke-auth.sh already applies to every REST/GraphQL call (via
+// SMOKE_RESOLVE), forwarded here as this env var (see smoke-auth.sh's own
+// comment on SMOKE_RESOLVE). curl's --resolve has no Node equivalent baked
+// into `ws`/`http`/`https`, so without this the OS resolver would look up
+// the *real* public hostname instead of the local rehearsal stack, which in
+// a path-mode local rehearsal either fails outright or, worse, silently
+// reaches a different (real) host — surfacing here as onWebSocketError
+// (WS_ERROR) on every single scenario, never a STOMP-level error, since the
+// TCP/TLS connection itself never reaches this stack's Caddy at all.
+// A custom `lookup` (passed straight through by `ws` to node's http/https
+// client, which forwards it to net.connect/tls.connect) resolves only the
+// configured hostname to the given IP while leaving `servername` as the
+// original hostname, so TLS SNI and certificate hostname checks still see
+// the name the internal CA (NODE_EXTRA_CA_CERTS) actually issued for.
+function buildWsOptions() {
+  const raw = process.env.SOCKBOWL_RESOLVE;
+  if (!raw) return undefined;
+  const parts = raw.split(':');
+  if (parts.length !== 3) {
+    console.error(`SOCKBOWL_RESOLVE must be host:port:ip, got: ${raw}`);
+    process.exit(2);
+  }
+  const [resolveHost, , resolveIp] = parts;
+  return {
+    // Node's net.connect (Happy Eyeballs, the default since Node 18) calls a
+    // custom `lookup` with `{ all: true }` and expects back an array of
+    // `{ address, family }` (not the classic dns.lookup callback shape of
+    // `(err, address, family)`) — get this wrong and it throws
+    // ERR_INVALID_IP_ADDRESS deep inside net.connect instead of ever
+    // reaching this stack's Caddy, which looks identical to a real
+    // connection failure (surfaces in stomp-probe.mjs as onWebSocketError).
+    lookup: (hostname, opts, cb) => {
+      if (hostname !== resolveHost) {
+        // Fall back to the real resolver for anything else (there
+        // shouldn't be anything else, but never silently misroute it).
+        import('node:dns').then(({ lookup }) => lookup(hostname, opts, cb));
+        return;
+      }
+      if (opts && opts.all) {
+        cb(null, [{ address: resolveIp, family: 4 }]);
+      } else {
+        cb(null, resolveIp, 4);
+      }
+    },
+    servername: resolveHost,
+  };
+}
+const WS_OPTIONS = buildWsOptions();
+
 /** @type {any} */
 const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
 const WS_URL = cfg.wsUrl;
@@ -103,7 +153,8 @@ class Probe {
     this.errors = [];
     this._listeners = [];
     this.client = new Client({
-      webSocketFactory: () => new WebSocket(WS_URL),
+      webSocketFactory: () =>
+        WS_OPTIONS ? new WebSocket(WS_URL, [], WS_OPTIONS) : new WebSocket(WS_URL),
       connectHeaders,
       reconnectDelay: 0,
       heartbeatIncoming: 0,

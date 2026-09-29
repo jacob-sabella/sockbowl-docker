@@ -31,7 +31,19 @@
 #   means the group has a stable single member.
 kafka_consumer_group_members() {
   local describe_output="$1"
-  awk 'NR>1 && NF>=7 && $7 != "" && $7 != "-" {print $7}' <<<"$describe_output" | sort -u
+  # A real data row is identified by its PARTITION column ($3) being an
+  # integer, not by line position (NR>1) or a loose NF lower bound: live-tested
+  # against a real broker, this Kafka version's --describe prints a leading
+  # blank line before the header, so a plain "skip line 1" left the literal
+  # header row in as if it were a data row -- and "CONSUMER-ID" (the header's
+  # own column-7 text) was reported back as if it were an actual,
+  # perpetually-unstable second consumer, so this never converged on "one
+  # stable member" and the whole wait_for_game_kafka_ready fallback timed out
+  # and FAILed on every real run. A blank line has NF=0 (no $3), the header's
+  # $3 is the literal word "PARTITION", and the "has no active members."
+  # sentence's $3 is a quoted group name -- none of those match `^[0-9]+$`,
+  # whatever line number they land on, so this needs no position assumption.
+  awk '$3 ~ /^[0-9]+$/ && $7 != "" && $7 != "-" {print $7}' <<<"$describe_output" | sort -u
 }
 
 # kafka_consumer_group_member_count <describe-output>

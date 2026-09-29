@@ -9,7 +9,9 @@
 # Fails (exit 1, which also ends the sourcing script) when any of these is
 # set to a known default or a CHANGE_ME / change-me placeholder:
 #   KEYCLOAK_ADMIN_PASSWORD, KEYCLOAK_USER_PASSWORD, POSTGRES_PASSWORD,
-#   SOCKBOWL_GAME_BACKEND_SECRET
+#   SOCKBOWL_GAME_BACKEND_SECRET, SOCKBOWL_REDIS_PASSWORD
+#
+# Also sourced by scripts/redis-start.sh (the redis service's entrypoint).
 #
 # Unset or empty variables are not checked: each container only receives the
 # secrets it needs, and the consumer fails on its own if a required one is
@@ -26,13 +28,15 @@ sockbowl_insecure_reason() {
       echo "a well-known default" ;;
     CHANGE_ME*|change-me*|change_me*|changeme*|ChangeMe*)
       echo "a placeholder" ;;
+    sockbowl-dev-*)
+      echo "a dev-only default (docker-compose.dev.yml)" ;;
     *) ;;
   esac
 }
 
 sockbowl_check_secrets() {
   _sb_bad=0
-  for _sb_var in KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_USER_PASSWORD POSTGRES_PASSWORD SOCKBOWL_GAME_BACKEND_SECRET; do
+  for _sb_var in KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_USER_PASSWORD POSTGRES_PASSWORD SOCKBOWL_GAME_BACKEND_SECRET SOCKBOWL_REDIS_PASSWORD; do
     eval "_sb_val=\${${_sb_var}:-}"
     [ -n "$_sb_val" ] || continue
     _sb_reason="$(sockbowl_insecure_reason "$_sb_val")"
