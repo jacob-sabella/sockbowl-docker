@@ -1,0 +1,55 @@
+## M6 DEP1-D: sockbowl-docker had no dependabot.yml before this. Coverage
+## added: docker-compose images (root), github-actions (root), and npm for
+## the stomp-probe helper at scripts/. See audit/m6/deps-docker.json and
+## PROGRESS.md (M6 ledger) for the version decisions behind the `ignore`
+## entries below.
+version: 2
+updates:
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker-compose-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Major PostgreSQL versions require an explicit migration; even the
+      # 18 -> 18.1 minor bump is deferred on purpose (audit/m6/deps-docker.json).
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
+      # redis is pinned to the 8.x line per the release plan; 9.x is a major
+      # version bump and needs its own review (audit/m6/deps-docker.json).
+      - dependency-name: "redis"
+        update-types: ["version-update:semver-major"]
+      # neo4j is CalVer, matched to the APOC/GDS plugin versions pulled by
+      # scripts/download-neo4j-plugins.sh. A neo4j bump must land together
+      # with a plugin bump, not as an automatic Dependabot PR.
+      - dependency-name: "neo4j"
+      # containrrr/watchtower is archived upstream (no new releases expected).
+      # Needs input in the M6 plan: drop it or replace it with a fork.
+      - dependency-name: "containrrr/watchtower"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "npm"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+    groups:
+      scripts-npm-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
