@@ -22,8 +22,10 @@
 #      `pg_restore --no-owner --role=$POSTGRES_USER -d keycloak` and
 #      `createdb sockbowl_legacy && pg_restore -d sockbowl_legacy` (O9).
 #   5. Keycloak: `up.sh -- up -d keycloak-realm-init keycloak`, wait for
-#      /auth/health/ready, then `up.sh -- up rbac-init` (the exact-set
-#      reconcile, WP-D1).
+#      /auth/health/ready, then `rotate-kc-admin.sh` (WP KC-ROT: rotates the
+#      migrated master admin password away from old prod's well-known
+#      default — see its own header), then `up.sh -- up rbac-init` (the
+#      exact-set reconcile, WP-D1).
 #   6. Everything else: `up.sh -- up -d --profile full`.
 #   7. Verification: scripts/deploy/verify.sh --mode counts (against
 #      --baseline, tolerance 0) — the internal curl checks are
@@ -138,11 +140,11 @@ run_remote_note "O9: copy sockbowl_legacy.user_used_question into sockbowl_users
 
 dlog "-- step 5: Keycloak 23 -> 26.7.4 --"
 up_ up -d keycloak-realm-init keycloak
+kc_container="${new_project}-keycloak-1"
 if [ "$DRY_RUN" = "true" ]; then
   dlog "[dry-run] would poll keycloak's /auth/health/ready (via docker exec, :9000) for up to ${kc_ready_timeout}s"
 else
   deadline=$((SECONDS + kc_ready_timeout))
-  kc_container="${new_project}-keycloak-1"
   until docker exec "$kc_container" sh -c \
     "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /auth/health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"status\": \"UP\"' <&3" \
     >/dev/null 2>&1; do
@@ -151,6 +153,12 @@ else
   done
   dlog "keycloak is ready"
 fi
+
+dlog "-- step 5b: rotate the migrated master admin password (WP KC-ROT, before rbac-init) --"
+"$SCRIPT_DIR/rotate-kc-admin.sh" "${dry_run_flag[@]}" \
+  --project-dir "$new_project_dir" --env-file "$new_project_dir/.env" \
+  --kc-container "$kc_container"
+
 up_ up rbac-init
 
 dlog "-- step 6: bring up the rest (full profile) --"

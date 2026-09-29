@@ -1,0 +1,45 @@
+# Throwaway Postgres + Keycloak stack for scripts/deploy/test-kc-rotate.sh.
+# Bridge networking, no published ports (rotate-kc-admin.sh only ever talks
+# to the keycloak container via `docker exec`, exactly like the real L3
+# flow), so this can run next to a host-networked sockbowl stack.
+name: ${KC_ROTATE_TEST_PROJECT:-sbdt-kcrot}
+
+services:
+  postgres:
+    image: ${KC_ROTATE_TEST_POSTGRES_IMAGE:-postgres:18}
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: kcrot-test-db-secret
+      POSTGRES_DB: keycloak
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  keycloak:
+    image: ${KC_ROTATE_TEST_KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.7.4}
+    command: start-dev
+    environment:
+      # The OLD, well-known-default-shaped password — the same thing
+      # migrating real data carries over into KEYCLOAK_ADMIN_PASSWORD_
+      # MIGRATE_FROM. Bootstrap-admin creation only ever runs once (it's a
+      # no-op against an existing master admin, exactly like the real DB
+      # restore case), so this is what the test's "old" password really is.
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ROTATE_TEST_OLD_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: kcrot-test-db-secret
+      KC_HTTP_PORT: "8080"
+      KC_HEALTH_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s

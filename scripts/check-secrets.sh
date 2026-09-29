@@ -17,6 +17,15 @@
 # secrets it needs, and the consumer fails on its own if a required one is
 # missing.
 #
+# WP KC-ROT: KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM is deliberately NOT in the
+# list below. It is a one-shot bridge (make-env.sh carries old prod's actual
+# current admin password into it; scripts/deploy/rotate-kc-admin.sh
+# authenticates with it exactly once, right after the Keycloak DB restore
+# and KC boot and before rbac-init, then deletes it from .env), never a live
+# credential this check needs to police — and KEYCLOAK_ADMIN_PASSWORD itself
+# stays checked here precisely so that a value carried straight over from
+# old prod (a well-known default, blocker V1-B01) is still refused.
+#
 # Escape hatch for local development only (docker-compose.dev.yml sets it):
 #   ALLOW_INSECURE_DEFAULTS=true
 #

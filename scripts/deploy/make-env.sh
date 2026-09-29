@@ -15,8 +15,9 @@
 # placeholder:
 #   1. If --old-env defines that key with a non-empty, non-placeholder value,
 #      carry it over verbatim (so redeploys keep the SAME Postgres/Neo4j/
-#      Redis/Keycloak-admin/game-backend/OpenAI credentials the old stack
-#      already used, rather than orphaning its data).
+#      Redis/game-backend/OpenAI credentials the old stack already used,
+#      rather than orphaning its data) — EXCEPT KEYCLOAK_ADMIN_PASSWORD (see
+#      WP KC-ROT below), which is always freshly generated.
 #   2. Otherwise generate one with `openssl rand -hex 32` — except
 #      OPENAI_API_KEY, which cannot be generated: if it's missing from
 #      --old-env this script leaves the CHANGE_ME placeholder in place and
@@ -25,6 +26,23 @@
 # Every other line of --example (identity, image tags, memory limits, AI
 # model names, ...) is copied through unchanged — only the known secret keys
 # are ever substituted.
+#
+# WP KC-ROT (owner decision 2026-09-29, fixes blocker V1-B01): old prod's
+# KEYCLOAK_ADMIN_PASSWORD is a well-known default, and scripts/check-secrets.sh
+# correctly refuses it — carrying it verbatim into the live credential (as
+# every other secret above does) would mean rbac-init, and everything that
+# depends_on it, never starts against migrated data. So this script instead:
+#   - ALWAYS generates a fresh KEYCLOAK_ADMIN_PASSWORD (never carries the old
+#     value into it, even when --old-env has a real one);
+#   - carries --old-env's actual current value, when there is one, into the
+#     separate KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM one-shot variable
+#     instead (left empty on a from-scratch install — nothing to migrate).
+#     scripts/check-secrets.sh does not police this name; it is not a live
+#     credential, only a one-time bridge scripts/deploy/rotate-kc-admin.sh
+#     uses, right after the Keycloak DB restore and KC boot and before
+#     rbac-init, to log in exactly once with the OLD password, set the
+#     master admin's password to the NEW one, verify the switch, and then
+#     delete this line from .env.
 #
 # NEVER prints a secret value: dry-run messages name the key and say only
 # "generated" or "carried over from <file>", never the value itself, and a
@@ -114,6 +132,14 @@ for key in "${SECRET_KEYS[@]}"; do
   example_val="${example_line#*=}"
   is_placeholder "$example_val" || continue
 
+  if [ "$key" = "KEYCLOAK_ADMIN_PASSWORD" ]; then
+    # WP KC-ROT: never carry old prod's value into the live credential —
+    # see the header comment and the MIGRATE_FROM resolution below.
+    resolved["$key"]="$(openssl rand -hex 32)"
+    source_of["$key"]="freshly generated (openssl rand -hex 32) — never carried over from $old_env, per WP KC-ROT"
+    continue
+  fi
+
   carried="$(old_env_value "$key")"
   if [ -n "$carried" ]; then
     resolved["$key"]="$carried"
@@ -126,7 +152,24 @@ for key in "${SECRET_KEYS[@]}"; do
   fi
 done
 
-for key in "${SECRET_KEYS[@]}"; do
+# WP KC-ROT: resolved independently of the loop above — it reads a
+# DIFFERENT source key (--old-env's KEYCLOAK_ADMIN_PASSWORD) into a
+# DIFFERENT destination key in --out (KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM).
+# Only touched when --example actually declares the line (so an --example
+# from before this WP, with no such line, is left byte-for-byte alone).
+migrate_from_key="KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM"
+migrate_from_example_line="$(grep -E "^${migrate_from_key}=" "$example" 2>/dev/null | tail -n1 || true)"
+if [ -n "$migrate_from_example_line" ]; then
+  old_admin_password="$(old_env_value KEYCLOAK_ADMIN_PASSWORD)"
+  if [ -n "$old_admin_password" ]; then
+    resolved["$migrate_from_key"]="$old_admin_password"
+    source_of["$migrate_from_key"]="carried over from $old_env's KEYCLOAK_ADMIN_PASSWORD (one-shot; scripts/deploy/rotate-kc-admin.sh consumes it once, then deletes this line)"
+  else
+    source_of["$migrate_from_key"]="left empty (no real KEYCLOAK_ADMIN_PASSWORD found in $old_env — nothing to migrate, e.g. a from-scratch install)"
+  fi
+fi
+
+for key in "${SECRET_KEYS[@]}" "$migrate_from_key"; do
   [ -n "${source_of[$key]:-}" ] || continue
   dlog "  $key: ${source_of[$key]}"
 done

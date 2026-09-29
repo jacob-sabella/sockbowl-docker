@@ -167,11 +167,49 @@ This one script orchestrates all of §5 L3 steps 1–7 in order: stop the old
 still Up afterward), offline-dump Neo4j with the **old** binary, load it into
 a fresh volume with the **new** one (2026.09 upgrades the store format
 in-place on first start), restore both Postgres dumps into a fresh PG 18,
-bring up Keycloak 26.7.4 and wait for `/auth/health/ready`, run `rbac-init`
-(the exact-set client/redirect-URI reconcile), then boot everything else and
-run `verify.sh --mode counts` against the L1 baseline (tolerance 0). Each
-substep is individually re-runnable from its own script if this needs to be
-resumed partway (see `migrate-data.sh --help`).
+bring up Keycloak 26.7.4 and wait for `/auth/health/ready`, **rotate the
+migrated master admin password** (`rotate-kc-admin.sh`, WP KC-ROT — see
+below), run `rbac-init` (the exact-set client/redirect-URI reconcile), then
+boot everything else and run `verify.sh --mode counts` against the L1
+baseline (tolerance 0). Each substep is individually re-runnable from its
+own script if this needs to be resumed partway (see `migrate-data.sh
+--help`).
+
+**Keycloak master admin rotation (WP KC-ROT, owner decision 2026-09-29,
+fixes blocker V1-B01).** Migrating the real Keycloak DB carries over its
+existing master admin credential — a well-known-default value in old prod —
+and `check-secrets.sh` correctly refuses that once it reaches
+`KEYCLOAK_ADMIN_PASSWORD`, which would otherwise block `rbac-init` (and
+everything that `depends_on` it) from ever starting against real data.
+`make-env.sh` now:
+  - always generates a **fresh** `KEYCLOAK_ADMIN_PASSWORD` for the new
+    `.env` — it never carries the old prod value into the live credential;
+  - carries old prod's *actual current* value, when there is one, into a
+    separate one-shot `KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM` variable
+    instead, which `check-secrets.sh` does not police (it is not a live
+    credential — see its own header comment).
+
+`scripts/deploy/rotate-kc-admin.sh` then runs (`migrate-data.sh` calls it
+automatically, right where the sequence above says) and:
+  1. authenticates as the master admin with the OLD password
+     (`KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM`), once, over the internal
+     network (`docker exec` into the keycloak container itself — never
+     through the public edge);
+  2. sets the master admin's password to the NEW value
+     (`KEYCLOAK_ADMIN_PASSWORD`);
+  3. verifies the NEW password now works and the OLD one is refused;
+  4. deletes `KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM` from `.env`.
+
+It is **idempotent**: if `KEYCLOAK_ADMIN_PASSWORD` already authenticates
+(a from-scratch install, or a re-run after a prior rotation already
+succeeded and cleaned up), it verifies and exits 0 without touching
+anything. Every password reaches `docker exec`/`kcadm.sh` via stdin and the
+`KC_CLI_PASSWORD` environment variable of that one command only — never
+argv, never printed. See `scripts/deploy/test-kc-rotate.sh` for the
+acceptance test (a throwaway Postgres+Keycloak, bootstrapped with an
+old-default-shaped password, proving the real rotation, its idempotency,
+the from-scratch no-op shape, and the "nothing to roll forward from" refusal
+all pass) and `rotate-kc-admin.sh --help` for the full contract.
 
 Real execution of this script against the live VPS is an opus-supervised
 step (§8) — it is never run for real outside `--dry-run` by this WP.
@@ -297,6 +335,22 @@ One entry point, `scripts/deploy/rollback.sh`, for every non-L1 rollback
 | `l2` | staged-but-not-started bundle | `rm -rf <project-dir>`, `docker image rm` each `--image` |
 | `l3` | migrated-and-booted new stack | `docker compose -p <new-project> down` (no `-v`), restart the old `sockbowl-docker` stack, verify it's Up |
 | `l4` | a bad Caddy reload | delegates to `caddy-apply.sh --rollback <ts>` (byte-identical restore + reload) |
+
+**`l3` and the KC-ROT rotation:** an `l3` rollback keeps the new stack's
+volumes for forensics (no `-v`) rather than deleting them, but either way
+the OLD stack's own volumes were only ever read from during L3, never
+written to, so the old stack's own master admin password is completely
+untouched by any of this — rotation only ever happens inside the NEW,
+migrated Keycloak DB, never the old one.
+If L3 is instead **resumed** partway (not rolled back) after a rotation
+already completed, `rotate-kc-admin.sh` is idempotent and safe to re-run:
+`KEYCLOAK_ADMIN_PASSWORD_MIGRATE_FROM` is already gone from `.env` by then,
+so it just verifies `KEYCLOAK_ADMIN_PASSWORD` still works and exits — it
+never re-authenticates with an old password that's already been changed
+away from. If a resume finds `rbac-init` already ran but
+`rotate-kc-admin.sh` did not (an interrupt landed between them), running
+`migrate-data.sh` again re-runs both in the right order; `rbac-init` itself
+is also idempotent (WP-D1's exact-set reconcile).
 
 Every step refuses to target the legacy project as its own destination (it
 would make no sense to "roll back" onto `sockbowl-docker`), and every
