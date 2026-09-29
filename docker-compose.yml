@@ -458,6 +458,9 @@ services:
       SPRING_AI_OLLAMA_BASE_URL: "${SPRING_AI_OLLAMA_BASE_URL}"
       SPRING_AI_OLLAMA_CHAT_OPTIONS_MODEL: "${SPRING_AI_OLLAMA_CHAT_OPTIONS_MODEL}"
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      # Master key for users' saved Claude API keys (AES-256-GCM); unset
+      # disables saving keys. questions refuses to start on a malformed value.
+      SOCKBOWL_AI_KEY_ENCRYPTION_KEY:
       SOCKBOWL_ALLOWED_ORIGINS: "${SOCKBOWL_QUESTIONS_ALLOWED_ORIGINS}"
       # Without these, questions falls back to NoSecurityConfig (permitAll) even
       # when AUTH_ENABLED=true — silently disabling all @PreAuthorize checks.
