@@ -133,9 +133,9 @@ run docker run --rm -v "${neo4j_new_volume}:/data" -v "${neo4j_backup_dir}:/back
 
 dlog "-- step 4: Postgres 13 -> 18 (logical restore) --"
 up_ up -d postgres
-run_with_stdin "$keycloak_dump" docker exec -i "$pg_container" pg_restore --no-owner --role="$pg_user" -d keycloak
+run_with_stdin "$keycloak_dump" docker exec -i "$pg_container" pg_restore -U "$pg_user" --no-owner --role="$pg_user" -d keycloak
 run docker exec "$pg_container" createdb -U "$pg_user" sockbowl_legacy
-run_with_stdin "$sockbowl_dump" docker exec -i "$pg_container" pg_restore -d sockbowl_legacy
+run_with_stdin "$sockbowl_dump" docker exec -i "$pg_container" pg_restore -U "$pg_user" -d sockbowl_legacy
 run_remote_note "O9: copy sockbowl_legacy.user_used_question into sockbowl_users only if \\d output matches column-for-column — done by hand, never assumed here"
 
 dlog "-- step 5: Keycloak 23 -> 26.7.4 --"
