@@ -350,7 +350,7 @@ services:
       # exposed as independently overridable env vars, because the two
       # services' limiter/ban keys collide by design (shared `rl:`/`usage:`/
       # `ban:` prefixes) and must land in the same Redis DB — see
-      # plans/m4-limits.md §2.1's key schema and its "must equal game's DB" note.
+      # docs/limits.md "Why questions depends on redis" and its Redis key schema.
       SOCKBOWL_REDIS_HOST: "${APP_HOST}"
       SOCKBOWL_REDIS_PORT: "${REDIS_PORT}"
       SOCKBOWL_DATABASE: 0
@@ -444,13 +444,21 @@ services:
         condition: service_healthy
 
   watchtower:
-    # containrrr/watchtower is archived upstream (no more releases/security fixes).
-    # nickfedor/watchtower (https://github.com/nicholas-fedor/watchtower) is the
-    # actively maintained fork and a drop-in replacement; not switched yet since
-    # it hasn't been smoke-tested against this compose file, but it's the first
-    # thing to try if this image falls behind.
+    # containrrr/watchtower is archived upstream (no more releases/security
+    # fixes). nickfedor/watchtower (https://github.com/nicholas-fedor/watchtower)
+    # is the actively maintained fork and a drop-in replacement; not switched
+    # yet since it hasn't been smoke-tested against this compose file, but
+    # it's the first thing to try if this image falls behind or a CVE lands.
+    #
+    # M6: moved out of the "full" profile into its own opt-in "autoupdate"
+    # profile (see README's "Watchtower / Docker socket" section for how to
+    # enable it) precisely because it's unmaintained upstream — auto-pulling
+    # and restarting containers from an abandoned auto-updater by default is
+    # a worse default than requiring an explicit opt-in. `--profile full` no
+    # longer starts it; add `--profile autoupdate` (it can be combined with
+    # `--profile full`) to also bring it up.
     image: containrrr/watchtower:1.7.1
-    profiles: ["full"]
+    profiles: ["autoupdate"]
     volumes:
       # Rootful Docker (most hosts) uses /var/run/docker.sock; rootless Docker
       # uses ${XDG_RUNTIME_DIR}/docker.sock. Override DOCKER_SOCKET_PATH in .env

@@ -61,8 +61,8 @@ fi
 # something to sample on a fresh stack. base.graphml above only ships
 # :Packet/:Tossup/:Bonus nodes (already-built packets), not the separate
 # qbreader-dump bank the Generate tab samples from, so a stack that only
-# imports the GraphML still has an empty bank (M3 follow-up from M1;
-# see PROGRESS.md). Idempotent: skipped if any :BankTossup already exists.
+# imports the GraphML still has an empty bank. Idempotent: skipped if any
+# :BankTossup already exists.
 echo "✅ Checking for existing BankTossup nodes..."
 BANK_COUNT=$(cypher-shell -a "${NEO4J_URL}" -u "${NEO4J_USER}" -p "${NEO4J_PASSWORD}" --format plain \
   "MATCH (n:BankTossup) RETURN count(n)" | tail -1)

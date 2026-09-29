@@ -152,10 +152,10 @@ regular demo user (player). Authoring demo user gets `author`.
 
 ## Revision 2, M2 (2026-09)
 
-Implementation (`plans/m2-auth.md`, waves W1–W4) landed with the following
-refinements to this spec. `keycloak/rbac-model.json` is the source of truth;
-this section reconciles it against Revision 1 above. See `PROGRESS.md`
-decisions D1–D15 for the full record.
+Implementation (M2, in waves) landed with the following refinements to this
+spec. `keycloak/rbac-model.json` is the source of truth; this section
+reconciles it against Revision 1 above. See `docs/auth.md` for the
+maintained day-to-day summary of the decisions below.
 
 - **D1 Guest posture.** Auth is additive, not a guest-mode toggle: guests can
   still host and join without a token, and a signed-in user hosts/joins with

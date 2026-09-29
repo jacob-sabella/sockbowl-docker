@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# test-kafka-readiness.sh — unit test for scripts/lib/kafka-consumer-stability.sh
-# (FIX-D1, plans/m2-auth.md fixWps, M2-LIVE-01).
+# test-kafka-readiness.sh — unit test for scripts/lib/kafka-consumer-stability.sh.
 #
 # Feeds canned `kafka-consumer-groups.sh --describe` output into
 # kafka_consumer_group_members / kafka_consumer_group_member_count and checks

@@ -1,6 +1,6 @@
-# WP-E1 r10: e2e:auth (M2's regression suite) must run under ONLY the dev
-# overlay's relaxed limits (plan m4-limits.md §4 "Regression (limits must
-# not break M2)"), never docker-compose.limits-e2e.yml's tiny test-only
+# e2e:auth (M2's regression suite) must run under ONLY the dev overlay's
+# relaxed limits (see docs/limits.md), never docker-compose.limits-e2e.yml's
+# tiny test-only
 # values -- that overlay's own header comment warns exactly this:
 # "session-create capacity of 2 per 20s and a hosted-sessions quota of 2
 # (guest) / 3 (player) will trip M2's and M3's own Playwright runs."
@@ -19,7 +19,7 @@
 # SOCKBOWL_QUOTA_GUEST_HOSTED_SESSIONS/SOCKBOWL_QUOTA_PLAYER_HOSTED_SESSIONS,
 # copied verbatim from docker-compose.dev.yml) or, where dev.yml leaves a key
 # unset (SOCKBOWL_RL_SESSION_CREATE_REFILL_PERIOD, SOCKBOWL_RL_STOMP_BUZZ_CAPACITY),
-# to the application's own documented default (plan §2.2: session-create
+# to the application's own documented default (docs/limits.md: session-create
 # 5/10m, stomp-buzz 5 burst / 3 per 1s) so the net effect exactly matches
 # "only the dev overlay", never standalone.
 services:

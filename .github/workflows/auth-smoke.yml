@@ -18,12 +18,12 @@ name: Full-stack auth smoke
 # the sibling repos). Run it by hand after pushing images, or wire a
 # `workflow_call` from a cross-repo release workflow once one exists.
 #
-# See PROGRESS.md risk #6 / scripts/test-compose-posture.sh: this stack uses
-# network_mode: host throughout, so it cannot run next to another full stack
-# on the same runner. GitHub-hosted runners are single-job-per-VM, so this is
-# never actually a conflict in CI; it only matters when running this by hand
-# on a shared dev host (serialize with any other full/keycloak+postgres
-# stack there).
+# See docs/auth.md "Single full-stack constraint" / scripts/test-compose-posture.sh:
+# this stack uses network_mode: host throughout, so it cannot run next to
+# another full stack on the same runner. GitHub-hosted runners are
+# single-job-per-VM, so this is never actually a conflict in CI; it only
+# matters when running this by hand on a shared dev host (serialize with any
+# other full/keycloak+postgres stack there).
 
 on:
   workflow_dispatch:
