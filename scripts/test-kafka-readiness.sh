@@ -67,6 +67,17 @@ game-consumers  game-topic   2          8               8               0    con
 expect_eq "two polls of the same stable member compare equal (offsets advancing doesn't matter)" \
   "$(kafka_consumer_group_members "$SAMPLE_A")" "$(kafka_consumer_group_members "$SAMPLE_B")"
 
+# (6) A leading blank line before the header, as this Kafka version's real
+# --describe output does (found live against a real broker, WP-D3): must
+# still report exactly the one real CONSUMER-ID, never the header's own
+# "CONSUMER-ID" text as a second, perpetually-unstable member.
+LEADING_BLANK='
+GROUP           TOPIC        PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID                                     HOST            CLIENT-ID
+game-consumers  game-topic   0          15              15              0    consumer-1-6f2b3e4a-abcd-4c56-8901-abcdef123456 /172.18.0.5     consumer-1'
+expect_eq "leading blank line before the header: count is still 1" "1" "$(kafka_consumer_group_member_count "$LEADING_BLANK")"
+expect_eq "leading blank line before the header: member id is the real CONSUMER-ID, not the header text" \
+  "consumer-1-6f2b3e4a-abcd-4c56-8901-abcdef123456" "$(kafka_consumer_group_members "$LEADING_BLANK")"
+
 echo
 echo "test-kafka-readiness: ${PASSED} passed, ${FAILED} failed"
 [ "$FAILED" -eq 0 ]

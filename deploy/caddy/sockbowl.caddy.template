@@ -28,29 +28,46 @@ ${SOCKBOWL_HOST} {
 	${TLS_DIRECTIVE}
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
-	@kcadmin path /auth/admin /auth/admin/*
-	respond @kcadmin 404
-	@qactuator path /questions/actuator /questions/actuator/*
-	respond @qactuator 404
-	@auth path /auth /auth/*
-	handle @auth {
-		reverse_proxy ${EDGE_PREFIX}-keycloak:8080
-	}
-	@ws path /ws /ws/*
-	handle @ws {
-		rewrite * /sockbowl-game?{query}
-		reverse_proxy ${EDGE_PREFIX}-game:7000 {
-			stream_close_delay 5m
+	# WP-D3 live-verify fix: everything below is wrapped in one `route` block
+	# on purpose. Caddyfile's default directive-type ordering places
+	# reverse_proxy/handle BEFORE respond regardless of where each is written
+	# in this file (confirmed with `caddy adapt`: the compiled route put both
+	# `respond @kcadmin 404` and `respond @qactuator 404` LAST, after every
+	# reverse_proxy handler) -- so, unwrapped, @auth's `handle` swallowed
+	# /auth/admin/* into Keycloak (a live 302, not the required 404) and
+	# handle_path /questions/*'s reverse_proxy swallowed
+	# /questions/actuator/health into a live 200 straight from the questions
+	# backend, silently defeating both O4 (admin console must never be
+	# public) and the actuator-hiding gate (§7's own curl set) -- confirmed
+	# against a real container before this fix, both leaking through. `route`
+	# makes Caddy execute every directive inside it in the exact order
+	# written here, so @kcadmin/@qactuator's `respond` now runs -- and
+	# terminates the request -- before @auth/handle_path even get a chance.
+	route {
+		@kcadmin path /auth/admin /auth/admin/*
+		respond @kcadmin 404
+		@qactuator path /questions/actuator /questions/actuator/*
+		respond @qactuator 404
+		@auth path /auth /auth/*
+		handle @auth {
+			reverse_proxy ${EDGE_PREFIX}-keycloak:8080
 		}
-	}
-	handle /api/* {
-		reverse_proxy ${EDGE_PREFIX}-game:7000 ${CLIENT_IP_HEADER_UP}
-	}
-	handle_path /questions/* {
-		reverse_proxy ${EDGE_PREFIX}-questions:7009 ${CLIENT_IP_HEADER_UP}
-	}
-	handle {
-		reverse_proxy ${EDGE_PREFIX}-ng:80
+		@ws path /ws /ws/*
+		handle @ws {
+			rewrite * /sockbowl-game?{query}
+			reverse_proxy ${EDGE_PREFIX}-game:7000 {
+				stream_close_delay 5m
+			}
+		}
+		handle /api/* {
+			reverse_proxy ${EDGE_PREFIX}-game:7000 ${CLIENT_IP_HEADER_UP}
+		}
+		handle_path /questions/* {
+			reverse_proxy ${EDGE_PREFIX}-questions:7009 ${CLIENT_IP_HEADER_UP}
+		}
+		handle {
+			reverse_proxy ${EDGE_PREFIX}-ng:80
+		}
 	}
 }
 # END sockbowl-m7
