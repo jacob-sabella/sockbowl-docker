@@ -115,7 +115,13 @@ run docker compose -p sockbowl-docker --env-file "$old_env_file" \
 run_remote_note "verify mage-*/aa-* are still Up (docker ps | grep -E '^mage-|^aa-') — this script does not stop or restart them, so any change there means something else acted, not this step"
 
 dlog "-- step 2: offline Neo4j dump (OLD binary $neo4j_old_image) --"
-old_neo4j_container="$(basename -- "$old_project_dir")-neo4j-1"
+# Old prod sets container_name (plain "neo4j"), so look it up by compose
+# label; fall back to Compose v2's default name for a stack without one.
+old_neo4j_container="$(docker ps -a \
+  --filter label=com.docker.compose.project=sockbowl-docker \
+  --filter label=com.docker.compose.service=neo4j \
+  --format '{{.Names}}' | head -n1)"
+old_neo4j_container="${old_neo4j_container:-$(basename -- "$old_project_dir")-neo4j-1}"
 "$SCRIPT_DIR/backup.sh" "${dry_run_flag[@]}" \
   --mode offline-neo4j \
   --neo4j-container "$old_neo4j_container" \
