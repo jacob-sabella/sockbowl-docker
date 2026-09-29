@@ -393,7 +393,11 @@ services:
       # and code cache; BPL_JVM_THREAD_COUNT (default 250) is the biggest lever
       # under a small limit. JAVA_TOOL_OPTIONS is per service so a developer's
       # own shell value never leaks in. All absent/empty unless set.
-      JAVA_TOOL_OPTIONS: "${SOCKBOWL_GAME_JAVA_TOOL_OPTIONS:-}"
+      # MaxDirectMemorySize is always set: left alone, the calculator pins it
+      # at 10M, and Netty (Lettuce, Kafka, the HTTP client) exhausts that
+      # under sustained load (M5 V1: OutOfDirectMemoryError after ~1.5 h of
+      # e2e). An explicit flag here is honored by the calculator.
+      JAVA_TOOL_OPTIONS: "-XX:MaxDirectMemorySize=${SOCKBOWL_GAME_MAX_DIRECT_MEMORY:-64m} ${SOCKBOWL_GAME_JAVA_TOOL_OPTIONS:-}"
       BPL_JVM_THREAD_COUNT: ${SOCKBOWL_GAME_JVM_THREAD_COUNT:-250}
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
@@ -483,7 +487,7 @@ services:
       SOCKBOWL_AI_SERVER_DAILY_BUDGET:
       SOCKBOWL_AI_SERVER_ALLOWED_MODELS:
       # DK-1 JVM caps; see the matching comment on sockbowl-game above.
-      JAVA_TOOL_OPTIONS: "${SOCKBOWL_QUESTIONS_JAVA_TOOL_OPTIONS:-}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxDirectMemorySize=${SOCKBOWL_QUESTIONS_MAX_DIRECT_MEMORY:-64m} ${SOCKBOWL_QUESTIONS_JAVA_TOOL_OPTIONS:-}"
       BPL_JVM_THREAD_COUNT: ${SOCKBOWL_QUESTIONS_JVM_THREAD_COUNT:-250}
     volumes:
       # See scripts/healthcheck/README.md: this image has no shell/curl, so the
