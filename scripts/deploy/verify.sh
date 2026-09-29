@@ -55,7 +55,7 @@
 #       demo users keycloak/rbac-model.json defines and
 #       scripts/deploy/verify.compose.yml seeds — never present against a
 #       real, non-rehearsal stack).
-#     - Keycloak sslRequired: baseline "NONE" -> current "external" is
+#     - Keycloak sslRequired: baseline "NONE" -> current "EXTERNAL" (case-insensitive) is
 #       always allowed (D1: the migrated realm's stale NONE setting is
 #       intentionally fixed by this deploy's own realm-settings.json, not a
 #       migration defect). Any other sslRequired change fails.

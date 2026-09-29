@@ -16,7 +16,7 @@
 #   - keycloak sockbowlRealmUserCount / sockbowlRealmCredentialCount may
 #     each be exactly $userDelta / $credDelta higher than baseline (the
 #     verify-overlay's demo users), never any other amount.
-#   - keycloak sslRequired: baseline "NONE" -> current "external" only.
+#   - keycloak sslRequired: baseline "NONE" -> current "EXTERNAL" only (Keycloak's SslRequired enum stores uppercase; compared case-insensitively).
 #   - neo4j constraints: a name may be present in current but absent from
 #     baseline only if it's in $allowConstraints; nothing may be present in
 #     baseline but absent from current (that's data/schema loss).
@@ -49,8 +49,8 @@ elif $sec == "keycloak" then
   (leafdiff("keycloak.loginTheme"; $bk.loginTheme; $ck.loginTheme)),
   ( ($ck.sslRequired) as $cs | ($bk.sslRequired) as $bs |
      if $bs == $cs then empty
-     elif ($bs == "NONE" and $cs == "external") then empty
-     else "keycloak.sslRequired: baseline=\($bs) current=\($cs) (only NONE->external is an allowed delta)" end ),
+     elif (($bs|ascii_upcase) == "NONE" and ($cs|ascii_upcase) == "EXTERNAL") then empty
+     else "keycloak.sslRequired: baseline=\($bs) current=\($cs) (only NONE->EXTERNAL (case-insensitive) is an allowed delta)" end ),
   ( (($bk.sockbowlRealmUserCount|tonumber)) as $bu | (($ck.sockbowlRealmUserCount|tonumber)) as $cu | ($cu-$bu) as $d |
      if $d==0 or $d==$userDelta then empty
      else "keycloak.sockbowlRealmUserCount: baseline=\($bu) current=\($cu) delta=\($d) (allowed: 0 or \($userDelta))" end ),
