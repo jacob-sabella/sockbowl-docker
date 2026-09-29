@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Runtime-only deps for scripts/stomp-probe.mjs (WP-D3, plan m2-auth.md section 3). Not published; scripts/smoke-auth.sh runs `npm install` here before invoking the probe. Kept as a real package.json + package-lock.json (not npx -p, which does not work for ESM import resolution) so the install is reproducible and offline-cacheable.",
   "dependencies": {
-    "@stomp/stompjs": "^7.0.0",
+    "@stomp/stompjs": "^7.3.0",
     "ws": "^8.18.0"
   }
 }
