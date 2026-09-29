@@ -166,8 +166,17 @@ up_ up -d --profile full
 
 dlog "-- step 7: verification (see also: scripts/deploy/verify.sh --mode curl, run once the edge network is reachable) --"
 if [ -n "$baseline_file" ]; then
+  # --sections postgres,keycloak only: $baseline_file here is the L1-era
+  # live baseline, and Neo4j's rehearsal-dump input predates it by design
+  # (§5 L1: the dump this restores is only rehearsal/migration input, not a
+  # live-parity snapshot). The tolerance-0 Neo4j comparison against a FRESH
+  # offline dump's own counts is a separate step, §5 L3.7 (scripts/deploy/
+  # verify.sh --mode counts --sections neo4j --baseline <fresh-dump-counts>
+  # --allow-added-constraint category_namekey --allow-added-constraint
+  # difficulty_namekey), run once L3.7's fresh dump exists — not here.
   "$SCRIPT_DIR/verify.sh" "${dry_run_flag[@]}" --mode counts \
     --project "$new_project" --pg-container "$pg_container" --pg-user "$pg_user" \
+    --sections postgres,keycloak \
     --baseline "$baseline_file"
 else
   dwarn "no --baseline given; skipping the automated counts comparison (run scripts/deploy/verify.sh --mode counts by hand)"

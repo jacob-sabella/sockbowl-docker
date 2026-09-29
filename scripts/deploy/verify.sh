@@ -29,19 +29,58 @@
 #                                          rejects the handshake, beats ng's
 #                                          catch-all serving index.html)
 #
-# --mode counts (§5 L3.7, tolerance 0): compares a baseline JSON (written by
-#   this same mode with --write-baseline, e.g. at L1/L3-preflight) against
-#   the live stack's Neo4j label/relationship counts, Keycloak realm/user/
-#   identity-provider/federated-identity/credential counts, and
-#   sockbowl_legacy.user_used_question — via `docker compose exec`, never an
-#   exposed port (H18/§7).
+# --mode counts (§5 L3.7, §7 gate 6, tolerance 0): builds a full counts JSON
+#   — Postgres (sockbowl_legacy's bans/user_game_history/user_stats/users/
+#   user_used_question, plus keycloak_db_size), Keycloak (realm/user/
+#   service-account/credential/identity-provider/federated-identity counts,
+#   loginTheme, sslRequired) and Neo4j (every label count, every
+#   relationship-type count, the full constraint name list and the index
+#   count) — via `docker exec`, never an exposed port (H18/§7). Which
+#   section(s) to query is controlled by --sections (default: all three), so
+#   the same script can also produce a Neo4j-only counts file from a scratch
+#   container that has no Postgres/Keycloak at all (§7 gate 6's
+#   independently-loaded source-dump comparison).
+#
+#   With --write-baseline FILE, writes the JSON there (this is what L1/
+#   L3-preflight, and a source-dump rehearsal load, use to record a target).
+#
+#   With --baseline FILE, compares the live counts against that JSON at
+#   TOLERANCE 0, section by section, with ONLY the following documented,
+#   named exceptions (everything else, including every label/relationship
+#   count, must match exactly or the check fails):
+#     - Keycloak sockbowlRealmUserCount / sockbowlRealmCredentialCount may
+#       be higher than the baseline by exactly --allow-realm-user-delta /
+#       --allow-realm-credential-delta (default 0 each; pass
+#       --verify-overlay-seeded as shorthand for "5 and 5", matching the 5
+#       demo users keycloak/rbac-model.json defines and
+#       scripts/deploy/verify.compose.yml seeds — never present against a
+#       real, non-rehearsal stack).
+#     - Keycloak sslRequired: baseline "NONE" -> current "external" is
+#       always allowed (D1: the migrated realm's stale NONE setting is
+#       intentionally fixed by this deploy's own realm-settings.json, not a
+#       migration defect). Any other sslRequired change fails.
+#     - Neo4j constraints: a name may appear in current but not in baseline
+#       only if it was passed via --allow-added-constraint (repeatable) —
+#       e.g. category_namekey/difficulty_namekey, added by the questions
+#       startup migrations (D4). A constraint present in baseline but
+#       missing from current always fails (that would be data loss).
+#     - Neo4j indexCount: allowed to be higher than baseline by exactly the
+#       number of --allow-added-constraint names given (each constraint
+#       backs exactly one index) — no other indexCount delta is allowed.
+#   Every Neo4j label and relationship-type count must match at tolerance 0
+#   with NO exception in any case — those are the actual migrated data, and
+#   this mode exists specifically to catch data loss in them.
 #
 # Usage:
 #   scripts/deploy/verify.sh --mode curl --host HOST [--ip IP]
 #     [--cacert FILE] [--realm sockbowl] [--public-url URL] [--timeout N]
 #   scripts/deploy/verify.sh --mode counts --project NAME
-#     [--pg-container NAME] [--pg-user NAME] [--neo4j-container NAME]
-#     [--neo4j-user NAME] [--neo4j-password PASS]
+#     [--sections postgres,keycloak,neo4j] [--sockbowl-db sockbowl_legacy]
+#     [--pg-container NAME] [--pg-user NAME] [--realm sockbowl]
+#     [--neo4j-container NAME] [--neo4j-user NAME] [--neo4j-password PASS]
+#     [--verify-overlay-seeded] [--allow-realm-user-delta N]
+#     [--allow-realm-credential-delta N]
+#     [--allow-added-constraint NAME ...]
 #     (--write-baseline FILE | --baseline FILE)
 #
 # Exit: 0 if every check in the selected mode passes; 1 otherwise (including
@@ -69,6 +108,11 @@ neo4j_user="${NEO4J_USER:-neo4j}"
 neo4j_password="${NEO4J_PASSWORD:-}"
 write_baseline=""
 baseline_file=""
+sections="postgres,keycloak,neo4j"
+sockbowl_db="sockbowl_legacy"
+allow_realm_user_delta=0
+allow_realm_credential_delta=0
+allow_added_constraints=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -83,12 +127,18 @@ while [ $# -gt 0 ]; do
     --project) project="$2"; shift 2 ;;
     --pg-container) pg_container="$2"; shift 2 ;;
     --pg-user) pg_user="$2"; shift 2 ;;
+    --sockbowl-db) sockbowl_db="$2"; shift 2 ;;
     --neo4j-container) neo4j_container="$2"; shift 2 ;;
     --neo4j-user) neo4j_user="$2"; shift 2 ;;
     --neo4j-password) neo4j_password="$2"; shift 2 ;;
     --write-baseline) write_baseline="$2"; shift 2 ;;
     --baseline) baseline_file="$2"; shift 2 ;;
-    -h|--help) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --sections) sections="$2"; shift 2 ;;
+    --verify-overlay-seeded) allow_realm_user_delta=5; allow_realm_credential_delta=5; shift ;;
+    --allow-realm-user-delta) allow_realm_user_delta="$2"; shift 2 ;;
+    --allow-realm-credential-delta) allow_realm_credential_delta="$2"; shift 2 ;;
+    --allow-added-constraint) allow_added_constraints+=("$2"); shift 2 ;;
+    -h|--help) sed -n '2,87p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) ddie "unknown argument: $1" ;;
   esac
 done
@@ -118,14 +168,22 @@ if [ "$DRY_RUN" = "true" ]; then
       exit 0
       ;;
     counts)
-      dlog "[dry-run] would run against project=$project:"
-      dlog "[dry-run]   docker exec $pg_container psql -U $pg_user -d keycloak -tAc 'SELECT count(*) FROM realm;'"
-      dlog "[dry-run]   docker exec $pg_container psql -U $pg_user -d keycloak -tAc 'SELECT count(*) FROM user_entity ... WHERE r.name=<realm>;'"
-      dlog "[dry-run]   docker exec $pg_container psql -U $pg_user -d sockbowl_legacy -tAc 'SELECT count(*) FROM user_used_question;'"
+      dlog "[dry-run] would run against project=$project, sections=$sections:"
+      want_section_dry() { case ",$sections," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+      if want_section_dry postgres; then
+        dlog "[dry-run]   docker exec $pg_container psql -U $pg_user -d keycloak -tAc 'SELECT pg_size_pretty(pg_database_size(...));'"
+        dlog "[dry-run]   docker exec $pg_container psql -U $pg_user -d $sockbowl_db -tAc 'SELECT count(*) FROM {bans,user_game_history,user_stats,users,user_used_question};'"
+      fi
+      if want_section_dry keycloak; then
+        dlog "[dry-run]   docker exec $pg_container psql -U $pg_user -d keycloak -tAc 'SELECT count(*) FROM realm;' (+ user/service-account/credential/identity-provider/federated-identity/loginTheme/sslRequired, scoped to realm=$realm)"
+      fi
+      if want_section_dry neo4j; then
+        dlog "[dry-run]   docker exec $neo4j_container cypher-shell -u $neo4j_user -p *** 'CALL db.labels() ... / db.relationshipTypes() ... / SHOW CONSTRAINTS / SHOW INDEXES'"
+      fi
       if [ -n "$write_baseline" ]; then
         dlog "[dry-run]   would write baseline to $write_baseline"
       elif [ -n "$baseline_file" ]; then
-        dlog "[dry-run]   would compare the above against baseline $baseline_file (tolerance 0)"
+        dlog "[dry-run]   would compare the above against baseline $baseline_file (tolerance 0, allowlist: realm-user-delta=$allow_realm_user_delta realm-credential-delta=$allow_realm_credential_delta allow-added-constraints=${allow_added_constraints[*]:-<none>})"
       else
         dlog "[dry-run]   no --baseline/--write-baseline given; would just print the current counts"
       fi
@@ -224,37 +282,106 @@ case "$mode" in
     ;;
 
   counts)
-    dlog "== verify counts: project=$project =="
-    counts_json="$(mktemp)"
-    trap 'rm -f "$counts_json"' EXIT
+    IFS=',' read -r -a section_list <<<"$sections"
+    want_section() {
+      local s
+      for s in "${section_list[@]}"; do [ "$s" = "$1" ] && return 0; done
+      return 1
+    }
+    dlog "== verify counts: project=$project sections=$sections =="
 
     pg_count() {
       local db="$1" sql="$2"
       docker exec "$pg_container" psql -U "$pg_user" -d "$db" -tAc "$sql" 2>/dev/null | tr -d '[:space:]'
     }
-    neo4j_counts() {
-      [ -n "$neo4j_password" ] || { echo '{}'; return; }
-      docker exec "$neo4j_container" cypher-shell -u "$neo4j_user" -p "$neo4j_password" --format plain \
-        'CALL db.labels() YIELD label CALL apoc.cypher.run("MATCH (n:`"+label+"`) RETURN count(n) AS c", {}) YIELD value RETURN label, value.c' 2>/dev/null \
-        | tail -n +2 || echo ''
+    # neo4j_query <cypher> — plain-format cypher-shell output (header row
+    # included), via `docker exec`, never an exposed port.
+    neo4j_query() {
+      docker exec "$neo4j_container" cypher-shell -u "$neo4j_user" -p "$neo4j_password" --format plain "$1" 2>/dev/null
+    }
+    # neo4j_kv_json <cypher> — runs a two-column "name, count" cypher query,
+    # strips the header row, and turns it into a {"name": count, ...} JSON
+    # object. Splits on the LAST comma (awk's `sub(/,[^,]*$/,...)` trick, the
+    # same rsplit-from-the-right approach L1's own baseline script uses in
+    # Python), so it stays correct even if a label/relationship-type name
+    # ever contained a comma; none of ours do today.
+    neo4j_kv_json() {
+      neo4j_query "$1" | tail -n +2 \
+        | awk -F',' 'NF>=2{v=$NF; gsub(/[ "]/,"",v); k=$0; sub(/,[^,]*$/,"",k); gsub(/[ "]/,"",k); if(k!="") printf "%s\t%s\n",k,v}' \
+        | jq -R -s 'split("\n") | map(select(length>0) | split("\t")) | map({(.[0]): (.[1]|tonumber)}) | add // {}'
+    }
+    # neo4j_list_json <cypher> — a single-column query -> a sorted JSON
+    # array of strings (used for the constraint name list).
+    neo4j_list_json() {
+      neo4j_query "$1" | tail -n +2 | sed 's/^"//; s/"$//' \
+        | jq -R -s 'split("\n") | map(select(length>0)) | sort'
     }
 
-    realm_count="$(pg_count keycloak "SELECT count(*) FROM realm;")"
-    kc_user_count="$(pg_count keycloak "SELECT count(*) FROM user_entity ue JOIN realm r ON ue.realm_id=r.id WHERE r.name='${realm:-sockbowl}';" 2>/dev/null || true)"
-    legacy_uuq="$(pg_count sockbowl_legacy "SELECT count(*) FROM user_used_question;" 2>/dev/null || echo 'n/a')"
+    postgres_json='null'
+    if want_section postgres; then
+      [ -n "$pg_container" ] || ddie "--pg-container is required for section 'postgres'"
+      kc_size="$(pg_count keycloak "SELECT pg_size_pretty(pg_database_size('keycloak'));")"
+      sb_bans="$(pg_count "$sockbowl_db" "SELECT count(*) FROM bans;")"
+      sb_ugh="$(pg_count "$sockbowl_db" "SELECT count(*) FROM user_game_history;")"
+      sb_ustats="$(pg_count "$sockbowl_db" "SELECT count(*) FROM user_stats;")"
+      sb_users="$(pg_count "$sockbowl_db" "SELECT count(*) FROM users;")"
+      sb_uuq="$(pg_count "$sockbowl_db" "SELECT count(*) FROM user_used_question;")"
+      postgres_json="$(jq -n \
+        --arg kc_size "${kc_size:-n/a}" --arg bans "${sb_bans:-n/a}" --arg ugh "${sb_ugh:-n/a}" \
+        --arg ustats "${sb_ustats:-n/a}" --arg users "${sb_users:-n/a}" --arg uuq "${sb_uuq:-n/a}" \
+        '{keycloak_db_size: $kc_size, sockbowl: {bans: $bans, user_game_history: $ugh, user_stats: $ustats, users: $users, user_used_question: $uuq}}')"
+    fi
 
-    {
-      printf '{\n'
-      printf '  "timestamp": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      printf '  "realmCount": "%s",\n' "${realm_count:-n/a}"
-      printf '  "keycloakUserCount": "%s",\n' "${kc_user_count:-n/a}"
-      printf '  "sockbowlLegacyUserUsedQuestion": "%s"\n' "${legacy_uuq:-n/a}"
-      printf '}\n'
-    } > "$counts_json"
+    keycloak_json='null'
+    if want_section keycloak; then
+      [ -n "$pg_container" ] || ddie "--pg-container is required for section 'keycloak'"
+      realm_count="$(pg_count keycloak "SELECT count(*) FROM realm;")"
+      kc_users="$(pg_count keycloak "SELECT count(*) FROM user_entity ue JOIN realm r ON ue.realm_id=r.id WHERE r.name='${realm}';")"
+      kc_svc="$(pg_count keycloak "SELECT count(*) FROM user_entity ue JOIN realm r ON ue.realm_id=r.id WHERE r.name='${realm}' AND ue.service_account_client_link IS NOT NULL;")"
+      kc_creds="$(pg_count keycloak "SELECT count(*) FROM credential c JOIN user_entity ue ON c.user_id=ue.id JOIN realm r ON ue.realm_id=r.id WHERE r.name='${realm}';")"
+      kc_idp="$(pg_count keycloak "SELECT count(*) FROM identity_provider idp JOIN realm r ON idp.realm_id=r.id WHERE r.name='${realm}' AND idp.enabled=true;")"
+      kc_fedid="$(pg_count keycloak "SELECT count(*) FROM federated_identity fi JOIN user_entity ue ON fi.user_id=ue.id JOIN realm r ON ue.realm_id=r.id WHERE r.name='${realm}';")"
+      kc_theme="$(pg_count keycloak "SELECT value FROM realm_attribute WHERE realm_id=(SELECT id FROM realm WHERE name='${realm}') AND name='loginTheme';")"
+      # KC 26 moved login_theme to a first-class column on realm; fall back
+      # to it when the KC23-era realm_attribute row is empty (V1(b) found
+      # this — see audit/m7/v1-local.md).
+      [ -n "$kc_theme" ] || kc_theme="$(pg_count keycloak "SELECT login_theme FROM realm WHERE name='${realm}';")"
+      kc_ssl="$(pg_count keycloak "SELECT ssl_required FROM realm WHERE name='${realm}';")"
+      keycloak_json="$(jq -n \
+        --arg realmCount "${realm_count:-n/a}" --arg users "${kc_users:-n/a}" --arg svc "${kc_svc:-n/a}" \
+        --arg creds "${kc_creds:-n/a}" --arg idp "${kc_idp:-n/a}" --arg fedid "${kc_fedid:-n/a}" \
+        --arg theme "${kc_theme:-n/a}" --arg ssl "${kc_ssl:-n/a}" \
+        '{realmCount: $realmCount, sockbowlRealmUserCount: $users, sockbowlRealmServiceAccountUserCount: $svc,
+          sockbowlRealmCredentialCount: $creds, sockbowlRealmEnabledIdentityProviderCount: $idp,
+          sockbowlRealmFederatedIdentityCount: $fedid, loginTheme: $theme, sslRequired: $ssl}')"
+    fi
+
+    neo4j_json='null'
+    if want_section neo4j; then
+      [ -n "$neo4j_password" ] || ddie "--neo4j-password is required for section 'neo4j'"
+      labels_json="$(neo4j_kv_json 'CALL db.labels() YIELD label CALL apoc.cypher.run("MATCH (n:`"+label+"`) RETURN count(n) AS c", {}) YIELD value RETURN label, value.c ORDER BY label')"
+      rels_json="$(neo4j_kv_json 'CALL db.relationshipTypes() YIELD relationshipType CALL apoc.cypher.run("MATCH ()-[r:`"+relationshipType+"`]->() RETURN count(r) AS c", {}) YIELD value RETURN relationshipType, value.c ORDER BY relationshipType')"
+      constraints_json="$(neo4j_list_json 'SHOW CONSTRAINTS YIELD name RETURN name ORDER BY name')"
+      idx_count="$(neo4j_query 'SHOW INDEXES YIELD name RETURN count(*) AS c' | tail -n +2 | tr -d '[:space:]"')"
+      [ -n "$labels_json" ] || labels_json='{}'
+      [ -n "$rels_json" ] || rels_json='{}'
+      [ -n "$constraints_json" ] || constraints_json='[]'
+      neo4j_json="$(jq -n \
+        --argjson labels "$labels_json" --argjson relationships "$rels_json" \
+        --argjson constraints "$constraints_json" --arg indexCount "${idx_count:-n/a}" \
+        '{labels: $labels, relationships: $relationships, constraints: $constraints, indexCount: $indexCount}')"
+    fi
+
+    counts_json="$(jq -n \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --argjson postgres "$postgres_json" --argjson keycloak "$keycloak_json" --argjson neo4j "$neo4j_json" \
+      '{timestamp: $ts} + (if $postgres != null then {postgres: $postgres} else {} end)
+        + (if $keycloak != null then {keycloak: $keycloak} else {} end)
+        + (if $neo4j != null then {neo4j: $neo4j} else {} end)')"
 
     if [ -n "$write_baseline" ]; then
       run mkdir -p "$(dirname -- "$write_baseline")"
-      cp "$counts_json" "$write_baseline"
+      printf '%s\n' "$counts_json" | jq -S '.' > "$write_baseline"
       dlog "wrote baseline: $write_baseline"
       cat "$write_baseline"
       exit 0
@@ -262,16 +389,26 @@ case "$mode" in
 
     if [ -n "$baseline_file" ]; then
       [ -f "$baseline_file" ] || ddie "--baseline not found: $baseline_file"
-      dlog "current:"; cat "$counts_json"
-      dlog "baseline:"; cat "$baseline_file"
-      if diff -q "$baseline_file" "$counts_json" >/dev/null 2>&1; then
-        pass "current counts match the baseline exactly (tolerance 0)"
+      dlog "current:"; printf '%s\n' "$counts_json" | jq -S '.'
+      dlog "baseline:"; jq -S '.' "$baseline_file"
+      allow_constraints_json="$(printf '%s\n' "${allow_added_constraints[@]}" | jq -R 'select(length>0)' | jq -s '.')"
+      sections_json="$(printf '%s\n' "${section_list[@]}" | jq -R . | jq -s '.')"
+      mismatches="$(jq -n -r \
+        --argjson current "$counts_json" \
+        --argjson baseline "$(jq -S '.' "$baseline_file")" \
+        --argjson sections "$sections_json" \
+        --argjson userDelta "$allow_realm_user_delta" \
+        --argjson credDelta "$allow_realm_credential_delta" \
+        --argjson allowConstraints "$allow_constraints_json" \
+        -f "$SCRIPT_DIR/verify-counts-compare.jq")"
+      if [ -z "$mismatches" ]; then
+        pass "current counts match the baseline at tolerance 0 (sections: $sections; allowlist: realm-user-delta=$allow_realm_user_delta realm-credential-delta=$allow_realm_credential_delta allow-added-constraints=${allow_added_constraints[*]:-<none>})"
       else
-        failc "current counts differ from the baseline (tolerance 0; see the two JSON blobs above)"
+        while IFS= read -r line; do failc "$line"; done <<<"$mismatches"
       fi
     else
       dlog "no --baseline given; printed current counts only (pass --write-baseline to record one)"
-      cat "$counts_json"
+      printf '%s\n' "$counts_json" | jq -S '.'
     fi
 
     dlog "$PASSED passed, $FAILED failed"
