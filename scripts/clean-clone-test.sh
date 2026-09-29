@@ -487,17 +487,24 @@ do_auth_on_smoke() {
   # FAIL row rather than a hard stop — so it's easy to miss.
   ( cd "$TMP/sockbowl-docker/scripts" && npm ci --quiet ) || return 1
   echo "-- scripts/smoke-auth.sh"
+  # M6V1-B01: do_auth_on_smoke runs as run_phase's `if "$@"` condition, which
+  # disables `set -e` for everything executed inside it (including this
+  # function) per bash's if/while-condition exemption. Without the explicit
+  # `|| return 1` below, a failing smoke-auth.sh would not stop the function,
+  # execution would fall through to the later ng auth-login-play.spec.ts
+  # step, and a pass there would make do_auth_on_smoke (and so this whole
+  # auth-on-smoke phase) return 0 even though the auth smoke matrix failed.
   if [ "$USE_SLOT" -eq 1 ]; then
     ensure_slot_jq
     stack_exec -w "$TMP/sockbowl-docker" \
       -e "SOCKBOWL_GAME_BACKEND_SECRET=$game_secret" \
       -e "NEO4J_PASSWORD=$neo4j_pw" \
-      -- bash -c "PATH=\"$JQ_DIR:\$PATH\" exec scripts/smoke-auth.sh"
+      -- bash -c "PATH=\"$JQ_DIR:\$PATH\" exec scripts/smoke-auth.sh" || return 1
   else
     stack_exec -w "$TMP/sockbowl-docker" \
       -e "SOCKBOWL_GAME_BACKEND_SECRET=$game_secret" \
       -e "NEO4J_PASSWORD=$neo4j_pw" \
-      -- scripts/smoke-auth.sh
+      -- scripts/smoke-auth.sh || return 1
   fi
   echo "-- ng tests-auth/auth-login-play.spec.ts"
   ( cd "$TMP/sockbowl-ng" && npm ci --quiet ) || return 1
