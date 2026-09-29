@@ -404,6 +404,21 @@ async function main() {
     'BANNED',
   );
 
+  // ---- pace the remaining CONNECTs against the real ws-connect budget ----
+  // docs/limits.md: ws-connect is 10/1m per ip. Everything above this point
+  // is already 9 CONNECTs (4 guest-credential rows, 1 guest-OK, 3 auth-seat
+  // rows, banned CONNECT), and the four scenarios from here on (forged SEND
+  // to a broker queue, forged identity headers, cross-game SUBSCRIBE, and
+  // the AUTH-18 service-token E2E) each open one more — 13 total, over the
+  // 10/1m budget. Against docker-compose.dev.yml's relaxed
+  // SOCKBOWL_RL_WS_CONNECT_CAPACITY=1000 this never mattered, but WP-V1
+  // (plans/m7-deploy.md §7) runs this script against the prod overlay
+  // unchanged — "nothing else differs from prod: same limits" — where the
+  // 11th CONNECT in under a minute is correctly RATE_LIMITED. Wait out one
+  // full refill period first so the remaining scenarios test what they say
+  // they test instead of failing on their own setup CONNECT.
+  await new Promise((resolve) => setTimeout(resolve, 61_000));
+
   // ---- forged SEND (AUTH-01: clients must not be able to spoof server events) ----
   const authHeaders = {
     gameSessionId: authSeat.gameSessionId,

@@ -60,3 +60,7 @@ pids
 # scripts/stomp-probe.mjs runtime deps (scripts/package.json); reinstalled by
 # scripts/smoke-auth.sh, not committed.
 scripts/node_modules/
+
+# WP-V1 local-rehearsal Caddyfile (scripts/deploy/render-caddy.sh --mode
+# local; see scripts/deploy/verify.compose.yml), regenerated per run.
+scripts/deploy/verify-caddy/

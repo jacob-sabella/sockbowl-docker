@@ -1,0 +1,59 @@
+# verify.compose.yml — WP-V1's verification-only overlay (plans/m7-deploy.md
+# §7 step 6). NEVER used on the VPS; local rehearsal only, layered on top of
+# the prod overlay:
+#
+#   docker compose -p sbm7v --env-file <scratch>/sbm7v.env \
+#     -f docker-compose.yml -f docker-compose.prod.yml -f scripts/deploy/verify.compose.yml \
+#     --profile full up -d
+#
+# It changes exactly two things relative to a real prod deploy:
+#   1. rbac-init also seeds the sockbowl-e2e direct-grant client and the demo
+#      accounts (SOCKBOWL_E2E/CREATE_DEMO_ACCOUNTS), so scripts/smoke-auth.sh
+#      and the Playwright suites (tests-auth, e2e) have something to log in
+#      as without driving a real Keycloak login UI or a real user's password.
+#   2. a throwaway local Caddy terminates TLS with its own internal CA
+#      (`tls internal`, rendered by scripts/deploy/render-caddy.sh --mode
+#      local into scripts/deploy/verify-caddy/Caddyfile — see that script and
+#      §7 steps 6-7), so the rehearsal can be driven at the real public
+#      hostname resolved to 127.0.0.1 (--resolve / PW_HOST_RESOLVER_RULES),
+#      with no /etc/hosts edit and no real ACME/Cloudflare contact. It joins
+#      the same `edge` network as the app services (the prod overlay already
+#      declares it external) under the aliases render-caddy.sh --mode local
+#      targets.
+#
+# Everything else — mem_limit, rate limits/quotas, Keycloak `start` (never
+# `start-dev`), image tags, the exact-set redirect-URI reconcile — is
+# byte-for-byte the prod overlay; this file adds nothing that would make a
+# green rehearsal here diverge from a green cutover on the VPS (§7 step 6's
+# "nothing else differs from prod").
+services:
+  rbac-init:
+    environment:
+      - SOCKBOWL_E2E=true
+      - CREATE_DEMO_ACCOUNTS=true
+      - DEMO_PASSWORD=${DEMO_PASSWORD:-demo123}
+
+  # scripts/deploy/render-caddy.sh --mode local writes the Caddyfile this
+  # mounts (§7 steps 6-7); nothing here renders it. `tls internal` makes
+  # Caddy mint its own local-only CA on first start, extracted afterwards
+  # with `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt`.
+  caddy:
+    image: caddy:2.11.3
+    networks:
+      edge: {}
+    volumes:
+      - ./scripts/deploy/verify-caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - verify_caddy_data:/data
+      - verify_caddy_config:/config
+    ports:
+      - "127.0.0.1:443:443"
+      - "127.0.0.1:443:443/udp"
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  verify_caddy_data: {}
+  verify_caddy_config: {}
