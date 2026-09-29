@@ -31,9 +31,9 @@
   },
   {
     "name": "npm:ng/e2e:typescript",
-    "pin": "5.9.3",
-    "reason": "Will be bumped to match ng root's 6.0.x by DEP1-N (M6 W2 run B, after M5). Not yet at 6.0.x because that bump is pending M5, like the others below; still far below the unconstrained 'latest' (7.x) because ng root itself is capped by Angular's peer range.",
-    "decision": "M6 plan §2 DEP1 (audit/m6/deps-ng.json); M6 plan §2 Order (\"the ng items wait for M5\")"
+    "pin": "6.0.3",
+    "reason": "DEP1-N (M6 W2 run B) bumped e2e's TypeScript to match ng root's 6.0.x once M5 merged. Pinned below the unconstrained 'latest' (7.x) because Angular 22.2's peer range requires TypeScript <6.1; dependabot.yml already ignores typescript >=6.1.0 at both / and /e2e for the same reason.",
+    "decision": "M6 plan §2 DEP1 (audit/m6/deps-ng.json); ng .github/dependabot.yml ignore entries for typescript >=6.1.0 (root and /e2e)"
   },
   {
     "name": "npm:ng/root:typescript-eslint",
