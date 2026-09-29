@@ -77,8 +77,13 @@ mapfile -t consumed < <(sort -u "$consumed_tmp")
 # A "declared" line is an assignment, active or commented-out-as-documentation
 # (`KEY=...` or `#KEY=...`); prose comments that merely mention a variable
 # name don't count, so this only matches a line shaped like an assignment.
-mapfile -t declared < <(grep -ohE '^#?[A-Z][A-Z0-9_]*=' "$ENV_EXAMPLE" \
-  | sed -E 's/^#?([A-Z][A-Z0-9_]*)=$/\1/' | sort -u)
+# The name charset here must stay in sync with step 1's consumed-var regex
+# (mixed case allowed after the first char): Neo4j's own config-to-env-var
+# mapping (e.g. NEO4J_server_memory_heap_max__size, for
+# server.memory.heap.max_size) is genuinely mixed-case, so an uppercase-only
+# pattern here would falsely flag an already-documented line as missing.
+mapfile -t declared < <(grep -ohE '^#?[A-Za-z_][A-Za-z0-9_]*=' "$ENV_EXAMPLE" \
+  | sed -E 's/^#?([A-Za-z_][A-Za-z0-9_]*)=$/\1/' | sort -u)
 
 declare -A is_declared=()
 for v in "${declared[@]}"; do
