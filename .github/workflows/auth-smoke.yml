@@ -1,8 +1,8 @@
 name: Full-stack auth smoke
 
-# Boots the *published* full stack (ghcr.io/.../:main images, not a build from
-# source — this repo has no checkout of sockbowl-game/questions/ng to build
-# from) with AUTH_ENABLED=true under the dev/e2e overlay, and runs
+# Boots the *published* full stack (ghcr.io/.../:<tag> images, not a build
+# from source — this repo has no checkout of sockbowl-game/questions/ng to
+# build from) with AUTH_ENABLED=true under the dev/e2e overlay, and runs
 # scripts/smoke-auth.sh (which delegates the STOMP rows to
 # scripts/stomp-probe.mjs): the plan's section 4.1 REST/GraphQL/STOMP
 # authorization matrix, for real, against real Keycloak tokens.
@@ -11,12 +11,15 @@ name: Full-stack auth smoke
 # rbac-reconcile.yml's Keycloak+Postgres-only stack, this brings up the whole
 # --profile full stack (network_mode: host: kafka, postgres, redis, neo4j,
 # keycloak, game, questions, ng) plus a local Ollama for questions' embedding
-# model — several minutes end to end, and it only exercises whatever is
-# currently published at :main, not this PR's unpushed changes (see
-# docker-compose.build.yml's header comment for running it against local
-# builds instead, e.g. from an orchestration workflow that has checked out
-# the sibling repos). Run it by hand after pushing images, or wire a
-# `workflow_call` from a cross-repo release workflow once one exists.
+# model — several minutes end to end. It defaults to whatever is published at
+# :main, but each of game/questions/ng's image tag can be overridden per run
+# (the workflow_dispatch inputs below), so once a release has actually pushed
+# images this can target that specific tag instead of only :main; it still
+# never builds this PR's unpushed source (see docker-compose.build.yml's
+# header comment for running against local builds instead, e.g. from an
+# orchestration workflow that has checked out the sibling repos). Run it by
+# hand after pushing images, or wire a `workflow_call` from a cross-repo
+# release workflow once one exists.
 #
 # See docs/auth.md "Single full-stack constraint" / scripts/test-compose-posture.sh:
 # this stack uses network_mode: host throughout, so it cannot run next to
@@ -27,6 +30,22 @@ name: Full-stack auth smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      game_tag:
+        description: "sockbowl-game image tag (ghcr.io/jacob-sabella/sockbowl-game:<tag>)"
+        required: false
+        default: "main"
+        type: string
+      questions_tag:
+        description: "sockbowl-questions image tag (ghcr.io/jacob-sabella/sockbowl-questions:<tag>)"
+        required: false
+        default: "main"
+        type: string
+      ng_tag:
+        description: "sockbowl-ng image tag (ghcr.io/jacob-sabella/sockbowl-ng:<tag>)"
+        required: false
+        default: "main"
+        type: string
 
 permissions:
   contents: read
@@ -61,12 +80,15 @@ jobs:
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           sudo systemctl enable --now ollama
-          for i in $(seq 1 30); do curl -fsS http://localhost:11434/ >/dev/null 2>&1 && break; sleep 2; done
+          for _ in $(seq 1 30); do curl -fsS http://localhost:11434/ >/dev/null 2>&1 && break; sleep 2; done
           ollama pull mxbai-embed-large
 
       - name: Generate real secrets and bring up the full stack
         env:
           COMPOSE_PROJECT: sbm2-smoke-ci
+          SOCKBOWL_GAME_IMAGE: "ghcr.io/jacob-sabella/sockbowl-game:${{ inputs.game_tag }}"
+          SOCKBOWL_QUESTIONS_IMAGE: "ghcr.io/jacob-sabella/sockbowl-questions:${{ inputs.questions_tag }}"
+          SOCKBOWL_NG_IMAGE: "ghcr.io/jacob-sabella/sockbowl-ng:${{ inputs.ng_tag }}"
         run: |
           cp .env.example .env
           {
@@ -96,7 +118,7 @@ jobs:
           compose() { docker compose -p "$COMPOSE_PROJECT" --env-file .env -f docker-compose.yml -f docker-compose.dev.yml "$@"; }
           for svc in keycloak sockbowl-game sockbowl-questions sockbowl-ng; do
             health=""
-            for i in $(seq 1 90); do
+            for _ in $(seq 1 90); do
               health="$(compose ps -a --format '{{.Health}}' "$svc" 2>/dev/null || true)"
               echo "state: $svc -> $health"
               [ "$health" = "healthy" ] && break
