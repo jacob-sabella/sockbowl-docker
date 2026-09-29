@@ -127,8 +127,10 @@ if wait_healthy; then
   dlog "$compose_service is healthy on $local_tag"
   record "ok (was ${previous:-unset})"
   # Keep the current and previous tags; drop older m7-* tags of this service.
-  docker images --format '{{.Repository}}:{{.Tag}}' "sockbowl-${service}" \
-    | grep -E ":m7-" | grep -vxF -e "$local_tag" -e "${previous:-__none__}" \
+  # (`|| true`: grep exits 1 when there's nothing old to prune, which
+  # pipefail would otherwise turn into a failed deploy.)
+  { docker images --format '{{.Repository}}:{{.Tag}}' "sockbowl-${service}" \
+    | grep -E ":m7-" | grep -vxF -e "$local_tag" -e "${previous:-__none__}" || true; } \
     | while read -r old; do docker rmi "$old" >/dev/null 2>&1 || true; done
   docker rmi "$remote_ref" >/dev/null 2>&1 || true
   exit 0
