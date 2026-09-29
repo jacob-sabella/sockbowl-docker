@@ -104,7 +104,7 @@ services:
   neo4j:
     network_mode: !reset null
     networks: [internal]
-    mem_limit: ${SOCKBOWL_NEO4J_MEM_LIMIT:-1100m}
+    mem_limit: ${SOCKBOWL_NEO4J_MEM_LIMIT:-1600m}
     environment:
       # DK-1: Neo4j sizes heap/page cache from HOST memory, not the container
       # limit, unless told otherwise.

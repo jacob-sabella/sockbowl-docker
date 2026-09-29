@@ -270,7 +270,8 @@ services:
       - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
       # DK-1: bare passthroughs (absent unless set). Neo4j sizes heap and page
       # cache from host RAM, not the container limit, so a mem_limit without
-      # these gets OOM-killed; prod sets 512m / 384m under a 1100m limit.
+      # these gets OOM-killed; prod sets 512m / 384m under a 1600m limit (the
+      # headroom covers the healthcheck's own cypher-shell JVM).
       - NEO4J_server_memory_heap_initial__size
       - NEO4J_server_memory_heap_max__size
       - NEO4J_server_memory_pagecache_size
@@ -279,7 +280,10 @@ services:
       - neo4j_plugins:/plugins
     command: ["neo4j"]
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -a bolt://localhost:${NEO4J_PORT:-7687} -u ${NEO4J_USER} -p ${NEO4J_PASSWORD} 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      # Credentials come from the container's own NEO4J_AUTH at run time ($$),
+      # not compose interpolation, so they never land in the healthcheck argv
+      # that `docker inspect`/`docker events` print.
+      test: ["CMD-SHELL", "NEO4J_USERNAME=\"$${NEO4J_AUTH%%/*}\" NEO4J_PASSWORD=\"$${NEO4J_AUTH#*/}\" cypher-shell -a bolt://localhost:${NEO4J_PORT:-7687} 'RETURN 1' >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 18
