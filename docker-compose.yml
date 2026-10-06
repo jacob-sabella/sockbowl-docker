@@ -109,7 +109,7 @@ services:
     restart: "no"
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.4
+    image: quay.io/keycloak/keycloak:26.8.0
     network_mode: "host"
     restart: unless-stopped
     # DK-1: the image already caps the heap at 70% of the container limit
