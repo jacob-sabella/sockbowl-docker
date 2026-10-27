@@ -80,7 +80,7 @@ services:
       start_period: 10s
 
   keycloak-realm-init:
-    image: alpine:3.24.2
+    image: alpine:3.24.3
     network_mode: "host"
     environment:
       - APP_HOST=${APP_HOST}
@@ -109,7 +109,7 @@ services:
     restart: "no"
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.4
+    image: quay.io/keycloak/keycloak:26.8.1-1
     network_mode: "host"
     restart: unless-stopped
     # DK-1: the image already caps the heap at 70% of the container limit
@@ -158,7 +158,7 @@ services:
       start_period: 40s
 
   rbac-init:
-    image: alpine:3.24.2
+    image: alpine:3.24.3
     network_mode: "host"
     environment:
       - KEYCLOAK_URL=${KEYCLOAK_INTERNAL_URL:-http://${APP_HOST}:${KEYCLOAK_PORT}}
@@ -202,7 +202,7 @@ services:
     restart: "no"
 
   neo4j-plugin-init:
-    image: curlimages/curl:8.22.0
+    image: curlimages/curl:8.23.0
     network_mode: "host"
     user: "root"
     volumes:
